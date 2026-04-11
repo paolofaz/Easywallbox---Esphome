@@ -51,7 +51,9 @@ You need two parameters from your charger:
 - Scan and identify the EasyWallbox 
 - Or use Bluetooth LE Explorer (Microsoft Store), which shows MAC addresses reliably
 
-### From any Android APP 
+### From any Android APP
+- Use any Bluetooth scanner app (e.g., BLE Scanner) to find the device and read its MAC address.
+
 
 ---
 
@@ -79,9 +81,9 @@ wifi ssid, wifi password, ota password (optional), api encryption.key (optional)
 
 ---
 
-# Features
+## Features
 
-## Charging Control
+### Charging Control
 
 - Start and Pause charging
 - Set charging power (user limit)
@@ -89,7 +91,7 @@ wifi ssid, wifi password, ota password (optional), api encryption.key (optional)
 - Dynamic data refresh based on the wallbox state
 - Command queue system to avoid Bluetooth congestion
 
-## Sensors & Telemetry
+### Sensors & Telemetry
 
 - Wallbox state (ready, charging, paused, connected etc)
 - Instant power (kW)
@@ -99,7 +101,7 @@ wifi ssid, wifi password, ota password (optional), api encryption.key (optional)
 - Energy delivered in the current session (kWh, auto‑reset at each new session)
 - Raw data output from the wallbox (for debugging/advanced use)
 
-## Manual Command Service (Advanced Users)
+### Manual Command Service (Advanced Users)
 
 A dedicated ESPHome service allows sending manual commands to the wallbox.
 
@@ -131,15 +133,17 @@ The commands that can be sent are the following and the raw output returned by t
 - GET SAFE LIMIT → $EEP,READ,IDX,156
 - GET DPM STATUS → $EEP,READ,IDX,178
 
-# License
-Released under the MIT License.
-
-# Contributions
-Contributions are welcome
-
 # 🍺 Support the Project
 
 If you found this project useful and want to support my work, you can offer me a beer:
 
 [![Buy Me a Beer](https://img.shields.io/badge/Buy%20Me%20a%20Beer-0070ba?style=for-the-badge&logo=paypal&logoColor=white)](https://paypal.me/PaoloFazari)
+
+
+## Contributions
+Contributions are welcome
+
+## License
+Released under the MIT License.
+
 
