@@ -137,8 +137,9 @@ Released under the MIT License.
 # Contributions
 Contributions are welcome
 
-## 🍺 Support the Project
+# 🍺 Support the Project
 
 If you found this project useful and want to support my work, you can offer me a beer:
 
-👉 **https://paypal.me/PaoloFazari**
+[![Buy Me a Beer](https://img.shields.io/badge/Buy%20Me%20a%20Beer-0070ba?style=for-the-badge&logo=paypal&logoColor=white)](https://paypal.me/PaoloFazari)
+
