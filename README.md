@@ -1,89 +1,64 @@
-# Easywallbox---Esphome
-Control the EasyWallbox charger (eSolutions Charging) via Bluetooth using ESPHome on an ESP32‑S3
-This project integrates the Esolution EasyWallbox into ESPHome, enabling full Bluetooth control and real‑time monitoring directly from Home Assistant.
+# EasyWallbox → ESPHome
 
-#### It requires an ESP32‑S3 and a few configuration steps to pair the charger.
+Control the EasyWallbox charger (eSolutions Charging) via Bluetooth using ESPHome on an ESP32‑S3.
 
-### You need two parameters from your charger:
-#### - Bluetooth MAC address
-#### - 4‑digit PIN (not the default 1234, although 1234 is still required for the initial handshake)
-### How to Retrieve the PIN
-Remove the front cover of the EasyWallbox.
+This project integrates the EasyWallbox into ESPHome, enabling full Bluetooth control and real‑time monitoring directly from Home Assistant.
 
-Scan the QR code underneath using any QR scanner app.
+---
 
-The result will be a long alphanumeric string.
+##  Requirements
 
-The last 4 digits are the Bluetooth PIN.
+- ESP32‑S3 development board  
+- EasyWallbox (eSolutions Charging)
 
-### How to Retrieve the MAC Address
+---
 
-From Home Assistant
-Settings → Devices & Services → Bluetooth
+##  Important Notes
 
-Scan for nearby devices
+The EasyWallbox can connect to **only one device at a time**.  
+You must uninstall or disable the official smartphone app before pairing it with ESPHome.
 
-Look for a device named similar to EasyWallbox or EW‑xxxx
+You need two parameters from your charger:
 
-From Linux
-bash
+- **Bluetooth MAC address**  
+- **4‑digit PIN** (not the default 1234, although 1234 is still required for the initial handshake)
 
-sudo hcitool lescan
+---
 
-From Windows
-Settings → Bluetooth & Devices → Add Device → Bluetooth
+##  How to Retrieve the PIN
 
-Scan and identify the EasyWallbox
+1. Remove the front cover of the EasyWallbox.  
+2. Scan the QR code underneath using any QR scanner app.  
+3. The result will be a long alphanumeric string.  
+4. The **last 4 digits** are the Bluetooth PIN.
 
-Or use Bluetooth LE Explorer (Microsoft Store), which shows MAC addresses reliably
+---
 
-# Features
+##  How to Retrieve the MAC Address
 
-## Charging Control
+### From Home Assistant
+- Settings → Devices & Services → Bluetooth  
+- Scan for nearby devices  
+- Look for a device named similar to *EasyWallbox* or *EW‑xxxx*
 
-Start and Pause charging
+### From Linux
+- Bash terminal
+- sudo hcitool lescan 
+- Look for a device named similar to *EasyWallbox* or *EW‑xxxx*
 
-Set charging power (user limit)
+### From Windows
+- Settings → Bluetooth & Devices → Add Device → Bluetooth 
+- Scan and identify the EasyWallbox 
+- Or use Bluetooth LE Explorer (Microsoft Store), which shows MAC addresses reliably
 
-Set DPM limit (Dynamic Power Management)
+### From Android APP 
 
-Dynamic data refresh based on the wallbox state
+---
 
-Command queue system to avoid Bluetooth congestion
+##  Installation
 
-## Sensors & Telemetry
+Copy wallbox.yaml into your ESPHome configuration directory or copy and paste the code in a new project making the following changes
 
-Wallbox state (ready, charging, paused, connected etc)
-
-Instant power (kW)
-
-Instant DPM power
-
-Voltage
-
-Charging session duration (in minutes)
-
-Energy delivered in the current session (kWh, auto‑reset at each new session)
-
-Raw data output from the wallbox (for debugging/advanced use)
-
-## Bonus for Nerds
-
-A dedicated ESPHome service allows sending manual commands to the wallbox.
-
-Supported commands include EEPROM reads/writes, manufacturing data, alarms, session logs, and more.
-
-Full list below.
-
-# Hardware Requirements
-ESP32‑S3 development board
-
-# Important Notes
-The EasyWallbox can connect to only one device at a time.
-### You must uninstall or disable the official smartphone app before pairing it with ESPHome.
-
-
-# ESPHome Configuration
 At the top of the YAML file you will find:
 
 ```
@@ -94,59 +69,67 @@ substitutions:
 ```
 Replace with:
 
-wallbox_mac → your EasyWallbox Bluetooth MAC
-
-wallbox_pin → the 4‑digit PIN
-
-dpm_default → maximum power supported by your installation
-
-Example: 4.8 = 4.8 kW - This is the base DPM value (modifiable later from Home Assistant)
+1) wallbox_mac → your EasyWallbox Bluetooth MAC
+2) wallbox_pin → the 4‑digit PIN
+3) dpm_default → maximum power supported by your installation - Example: 4.8 = 4.8 kW - This is the base DPM value (modifiable later from Home Assistant)
 
 Also update:
 
 wifi ssid, wifi password, ota password (optional), api encryption.key (optional)
 
+---
 
-# Manual Command Service (Advanced Users)
-You can manually send low‑level commands using the exposed ESPHome service. These commands follow the EasyWallbox protocol.
-## EEPROM / Data Commands
-INDEX WRITE → $EEP,WRITE,IDX,{index}
+# Features
 
-INDEX READ → $EEP,READ,IDX,{index}
+## Charging Control
 
-READ ALARMS → $EEP,READ,AL,{alarmnum}
+- Start and Pause charging
+- Set charging power (user limit)
+- Set DPM limit (Dynamic Power Management)
+- Dynamic data refresh based on the wallbox state
+- Command queue system to avoid Bluetooth congestion
 
-READ MANUFACTURING → $EEP,READ,MF
+## Sensors & Telemetry
 
-READ CHARGING SESSIONS → $EEP,READ,SL,{sessionnum}
+- Wallbox state (ready, charging, paused, connected etc)
+- Instant power (kW)
+- Instant DPM power
+- Voltage
+- Charging session duration (in minutes)
+- Energy delivered in the current session (kWh, auto‑reset at each new session)
+- Raw data output from the wallbox (for debugging/advanced use)
 
-READ SETTINGS → $EEP,READ,ST
+## Manual Command Service (Advanced Users)
 
-READ APP DATA → $DATA,READ,AD
+A dedicated ESPHome service allows sending manual commands to the wallbox.
 
-READ HW SETTINGS → $DATA,READ,HS
+The commands that can be sent are the following and the raw output returned by the wallbox is exposed through a text sensor named Raw: 
 
-READ SUPPLY VOLTAGE → $DATA,READ,SV
+### EEPROM / Data Commands
 
-## Write Commands
-SET USER LIMIT → $EEP,WRITE,IDX,174,{limit}
+- INDEX WRITE → $EEP,WRITE,IDX,{index}
+- INDEX READ → $EEP,READ,IDX,{index}
+- READ ALARMS → $EEP,READ,AL,{alarmnum}
+- READ MANUFACTURING → $EEP,READ,MF
+- READ CHARGING SESSIONS → $EEP,READ,SL,{sessionnum}
+- READ SETTINGS → $EEP,READ,ST
+- READ APP DATA → $DATA,READ,AD
+- READ HW SETTINGS → $DATA,READ,HS
+- READ SUPPLY VOLTAGE → $DATA,READ,SV
 
-SET DPM LIMIT → $EEP,WRITE,IDX,158,{limit}
+### Write Commands
 
-SET DPM OFF → $EEP,WRITE,IDX,178,0
+- SET USER LIMIT → $EEP,WRITE,IDX,174,{limit}
+- SET DPM LIMIT → $EEP,WRITE,IDX,158,{limit}
+- SET DPM OFF → $EEP,WRITE,IDX,178,0
+- SET DPM ON → $EEP,WRITE,IDX,178,1
 
-SET DPM ON → $EEP,WRITE,IDX,178,1
+### Read Commands
 
-## Read Commands
-GET USER LIMIT → $EEP,READ,IDX,174
-
-GET DPM LIMIT → $EEP,READ,IDX,158
-
-GET SAFE LIMIT → $EEP,READ,IDX,156
-
-GET DPM STATUS → $EEP,READ,IDX,178
-
-The raw output returned by the wallbox is exposed through a text sensor named Raw
+- GET USER LIMIT → $EEP,READ,IDX,174
+- GET DPM LIMIT → $EEP,READ,IDX,158
+- GET SAFE LIMIT → $EEP,READ,IDX,156
+- GET DPM STATUS → $EEP,READ,IDX,178
 
 # License
 Released under the MIT License.
