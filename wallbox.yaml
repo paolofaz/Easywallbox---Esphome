@@ -216,7 +216,6 @@ text_sensor:
                     volts = atof(p[11]) / amps;
                   }
                   id(wallbox_charge_volts).publish_state(volts);
-                  id(reset_text).execute();
                 }
               }
               nl = id(tx_buffer).find('\n');
@@ -325,7 +324,6 @@ button:
       - script.execute: wallbox_request_user_limit
       - script.execute: wallbox_request_dpm_limit
       - script.execute: wallbox_request_data
-      - script.execute: reset_text
 
 # Helper script per leggere i limiti 
 
