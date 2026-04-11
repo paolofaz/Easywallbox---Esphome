@@ -1,0 +1,482 @@
+substitutions:
+  wallbox_mac: "xx:xx:xx:xx:xx:xx" #Wallbox bluetooth MAC ADRRESS
+  wallbox_pin: "XXXX" #Wallbox pin bluetooth (scan qr code, last 4 digit)
+  dpm_default: 4.8  #Default KW home DPM 
+
+esphome:
+  name: wallbox
+  friendly_name: Wallbox
+  on_boot:
+    - priority: -10
+      then:
+        - binary_sensor.template.publish:
+            id: wallbox_connected
+            state: false
+
+esp32:
+  board: esp32-s3-devkitc-1
+  variant: esp32s3
+  framework:
+    type: esp-idf
+
+esp32_ble:
+  setup_priority: -100
+  io_capability: keyboard_only
+
+wifi:
+  ssid: "YOUR SSID"
+  password: "YOUR PASSWORD"
+#  min_auth_mode: WPA2
+
+logger:
+  level: DEBUG
+
+api:
+  #encryption:
+    #key: "YOURKEY"
+  services:
+    - service: send_command
+      variables:
+        cmd: string
+      then:
+        - lambda: |-
+            id(ble_safe_write).execute(cmd);
+
+ota:
+  - platform: esphome
+   # password: "YOUR PASSWORD"
+
+globals:
+  - id: tx_buffer
+    type: std::string
+    initial_value: ""
+  - id: dpm_is_zero
+    type: bool
+    initial_value: "true"
+  - id: dpm_last_valid
+    type: float
+    restore_value: yes
+    initial_value: "-1"
+  - id: last_request
+    type: unsigned long
+    initial_value: '0'
+  - id: ble_response_received
+    type: bool
+    initial_value: "false"
+  
+
+esp32_ble_tracker:
+  scan_parameters:
+    interval: 2s
+    window: 200ms
+    active: false
+
+ble_client:
+  - mac_address: ${wallbox_mac}
+    id: wallbox_client
+    on_passkey_request:
+      then:
+        - ble_client.passkey_reply:
+            id: wallbox_client
+            passkey: 1234
+    on_connect:
+      then:   
+        - lambda: |-
+           std::string mac = "${wallbox_mac}";
+           esp_bd_addr_t remote_bda;
+           int values[6];
+           int parsed = sscanf(mac.c_str(), "%x:%x:%x:%x:%x:%x",
+             &values[0], &values[1], &values[2],
+             &values[3], &values[4], &values[5]);
+           if (parsed != 6) {
+             ESP_LOGE("ble_sec", "Errore parsing MAC!");
+             return;
+            }
+            for (int i = 0; i < 6; i++) {
+              remote_bda[i] = (uint8_t)values[i];
+            }
+            esp_ble_set_encryption(remote_bda, ESP_BLE_SEC_ENCRYPT_MITM);    
+        - delay: 8s
+        - logger.log: "Invio AUTH..."
+        - script.execute:
+            id: ble_safe_write
+            cmd: "$BLE,AUTH,${wallbox_pin}"
+        - script.execute: wallbox_request_user_limit
+        - script.execute: wallbox_request_dpm_limit
+        - script.execute: wallbox_request_data
+    on_disconnect:
+      then:
+        - lambda: |-
+            id(wallbox_connected).publish_state(false);
+
+text_sensor:
+  - platform: ble_client
+    ble_client_id: wallbox_client
+    id: wallbox_rx
+    internal: true
+    notify: true
+    service_uuid: "331a36f5-2459-45ea-9d95-6142f0c4b307"
+    characteristic_uuid: "a73e9a10-628f-4494-a099-12efaf72258f"
+    on_value:
+      then:
+        - lambda: |-
+            id(tx_buffer) += x;
+            size_t nl = id(tx_buffer).find('\n');
+
+            while (nl != std::string::npos) {
+              std::string line = id(tx_buffer).substr(0, nl);
+              id(tx_buffer) = id(tx_buffer).substr(nl + 1);
+
+              id(wallbox_raw_output).publish_state(line);
+              id(ble_response_received) = true;
+              if (line.find("$BLE,AUTH,OK") != std::string::npos) {
+                id(wallbox_connected).publish_state(true); }
+
+              if (line.find("$EEP,READ,IDX") != std::string::npos) {
+                char buf[200];
+                strncpy(buf, line.c_str(), sizeof(buf)-1);
+                buf[sizeof(buf)-1] = 0;
+
+                char *p[8];
+                int n = 0;
+                char *tok = strtok(buf, ",");
+                while (tok && n < 8) { p[n++] = tok; tok = strtok(nullptr, ","); }
+
+                if (n >= 5) {
+                  int idx = atoi(p[3]);
+                  float amps_x10 = atof(p[4]);
+                  float amps = amps_x10 / 10.0f;
+                  float kw_grezzo = amps * 0.23f;
+                  float kw = roundf(kw_grezzo * 10.0f) / 10.0f;
+                  if (idx == 174) {
+                    id(wallbox_user_limit).publish_state(kw);
+                    id(wallbox_power_set).publish_state(kw);
+                  }
+
+                  if (idx == 158) {
+
+                    bool stopped = (amps <= 0);
+                    id(dpm_is_zero) = stopped;
+
+                    id(wallbox_charge_switch).publish_state(!stopped);
+                    id(house_limit).publish_state(kw);
+                    if (stopped && id(dpm_last_valid) < 0) {
+                      id(dpm_last_valid) = ${dpm_default};
+                    } else {
+                        if (amps > 0) {
+                        id(dpm_last_valid) = kw;
+                        }
+                      }
+                    id(wallbox_dpm_limit).publish_state(id(dpm_last_valid));                      
+                   
+                  }
+                }
+              }
+              if (line.rfind("$DATA,READ,AD", 0) == 0) {
+                char buf[300];
+                strncpy(buf, line.c_str(), sizeof(buf)-1);
+                buf[sizeof(buf)-1] = 0;
+                char *p[40];
+                int n = 0;
+                char *tok = strtok(buf, ",");
+                while (tok && n < 40) {
+                  p[n++] = tok;
+                  tok = strtok(nullptr, ",");
+                }
+                if (n > 23) {
+                  int stato = atoi(p[7]);
+                  std::string stato_txt;
+                  switch (stato) {
+                    case 3: stato_txt = "Cable Unplugged"; break;
+                    case 8: stato_txt = "Charging"; break;
+                    case 6: stato_txt = "Charge ending"; break;
+                    case 5: stato_txt = "Pause"; break;
+                    default:
+                      stato_txt = "Sconosciuto (" + std::to_string(stato) + ")";
+                      break;
+                  }
+                  id(wallbox_charge_state).publish_state(stato_txt);
+                  if (stato == 8) {
+                    id(car_charging).publish_state(true);
+                  } else {
+                      id(car_charging).publish_state(false);
+                    }  
+                  float amps = atof(p[10]) / 10.0f;
+                  id(wallbox_current).publish_state(amps);
+                  float kilowatts = atof(p[11]) / 1000.0f;
+                  id(wallbox_power).publish_state(kilowatts);
+                  float house_load = atof(p[14]) * 0.023f;
+                  id(wallbox_house_load).publish_state(house_load);
+                  float session_kwh = atof(p[22]) / 10.0f;
+                  id(wallbox_session_kwh).publish_state(session_kwh);
+                  int minutes = atoi(p[23]);
+                  id(wallbox_charge_minutes).publish_state(minutes);
+                  float volts = 0;
+                  if (amps > 0) {
+                    volts = atof(p[11]) / amps;
+                  }
+                  id(wallbox_charge_volts).publish_state(volts);
+                  id(reset_text).execute();
+                }
+              }
+              nl = id(tx_buffer).find('\n');
+            }
+
+  - platform: template
+    name: "Raw"
+    id: wallbox_raw_output
+
+  - platform: template
+    name: "State"
+    id: wallbox_charge_state
+
+binary_sensor:
+  - platform: template
+    name: "Connection"
+    id: wallbox_connected
+    device_class: connectivity
+
+  - platform: template
+    name: "Charging"
+    id: car_charging
+    device_class: battery_charging
+
+  - platform: template
+    id: charge_stopped
+    name: "Ready-Stopped"
+    device_class: power
+    lambda: |-
+      return !id(dpm_is_zero);
+
+number:
+  - platform: template
+    name: "Charge power"
+    id: wallbox_user_limit
+    icon: "mdi:flash"
+    unit_of_measurement: "kW"
+    device_class: power
+    min_value: 1.4
+    max_value: 7.4
+    step: 0.2
+    optimistic: false
+    set_action:
+      - lambda: |-
+          id(wallbox_user_limit).publish_state(x);
+      - script.execute:
+          id: send_wallbox_limit
+          value: !lambda 'return x;'
+
+  - platform: template
+    name: "Home limit -DPM-"
+    id: wallbox_dpm_limit
+    icon: "mdi:flash"
+    unit_of_measurement: "kW"
+    device_class: power
+    min_value: 1.4
+    max_value: 7.4
+    step: 0.2
+    optimistic: false
+    set_action:
+      - lambda: |-
+          id(dpm_last_valid) = x;
+          id(wallbox_dpm_limit).publish_state(x);     
+      - if:
+          condition:
+            lambda: 'return !id(dpm_is_zero);'
+          then:
+            - script.execute:
+                id: send_house_limit
+                value: !lambda 'return x;'
+
+switch:
+  - platform: template
+    name: "Start-Stop"
+    id: wallbox_charge_switch
+    lambda: |-
+      return !id(dpm_is_zero);
+
+    turn_on_action:
+      - lambda: |-
+          float kw = id(dpm_last_valid);
+          int amps_x10 = (int)((kw / 0.23f) * 10.0f + 0.5f);
+          char cmd[40];
+          snprintf(cmd, sizeof(cmd), "$EEP,WRITE,IDX,158,%d", amps_x10);
+          id(ble_safe_write).execute(cmd);
+          id(dpm_is_zero) = false;
+          id(house_limit).publish_state(kw);
+      - delay: 20s
+      - script.execute: wallbox_request_data
+    turn_off_action:
+      - lambda: |-
+          char cmd[40];
+          snprintf(cmd, sizeof(cmd), "$EEP,WRITE,IDX,158,%d", 0);
+          id(ble_safe_write).execute(cmd);
+          id(dpm_is_zero) = true;
+          id(house_limit).publish_state(0);
+      - delay: 20s
+      - script.execute: wallbox_request_data
+button:
+  - platform: restart
+    name: "Restart ESP32"
+  - platform: template
+    name: "Refresh dati"
+    id: btn_sequenza_wallbox
+    on_press:
+      - script.execute: wallbox_request_user_limit
+      - script.execute: wallbox_request_dpm_limit
+      - script.execute: wallbox_request_data
+      - script.execute: reset_text
+
+# Helper script per leggere i limiti 
+
+script:
+  - id: wallbox_request_user_limit
+    then:
+      - lambda: |-
+          id(ble_safe_write).execute("$EEP,READ,IDX,174");
+
+  - id: wallbox_request_dpm_limit
+    then:
+      - lambda: |-
+          id(ble_safe_write).execute("$EEP,READ,IDX,158");
+
+  - id: wallbox_request_data
+    then:
+      - lambda: |-
+          id(ble_safe_write).execute("$DATA,READ,AD");
+
+  - id: ble_safe_write
+    mode: queued
+    max_runs: 10
+    parameters:
+      cmd: string
+    then:
+      - lambda: |-
+          id(ble_response_received) = false;
+      - ble_client.ble_write:
+          id: wallbox_client
+          service_uuid: '331a36f5-2459-45ea-9d95-6142f0c4b307'
+          characteristic_uuid: 'a9da6040-0823-4995-94ec-9ce41ca28833'
+          value: !lambda |-
+            std::string s = cmd;
+            if (!s.empty() && s.back() != '\n') {
+                  s += "\n";
+                }
+            return std::vector<uint8_t>(s.begin(), s.end());
+      - wait_until:
+          condition:
+            lambda: 'return id(ble_response_received);'
+          timeout: 10s
+      - delay: 2s 
+
+  - id: reset_text
+    mode: restart
+    then:
+      - delay: 2s
+      - lambda: |-
+          id(wallbox_raw_output).publish_state("");
+
+  - id: send_wallbox_limit
+    mode: restart
+    parameters:
+      value: float
+    then:
+      - delay: 2s
+      - lambda: |-
+          int amps_x10 = (int)((value / 0.23f) * 10.0f + 0.5f);
+          char cmd[40];
+          snprintf(cmd, sizeof(cmd), "$EEP,WRITE,IDX,174,%d", amps_x10);
+          id(ble_safe_write).execute(cmd);
+          id(wallbox_power_set).publish_state(value);
+
+  - id: send_house_limit
+    mode: restart
+    parameters:
+      value: float
+    then:
+      - delay: 2s
+      - lambda: |-
+          int amps_x10 = (int)((value / 0.23f) * 10.0f + 0.5f);
+          char cmd[40];
+          snprintf(cmd, sizeof(cmd), "$EEP,WRITE,IDX,158,%d", amps_x10);
+          id(ble_safe_write).execute(cmd);
+          id(house_limit).publish_state(value);
+
+
+interval:
+  - interval: 60s
+    then:
+      - lambda: |-
+          unsigned long now = millis();
+          unsigned long delta = now - id(last_request);
+          unsigned long target_interval;
+          if (!id(dpm_is_zero)) {
+            if (id(wallbox_charge_state).state == "Charging") {
+              target_interval = 60000;
+            } else {
+              target_interval = 300000;
+            }
+          } else {
+            target_interval = 1200000;
+          }
+          if (delta >= target_interval) {
+            id(last_request) = now;
+            id(wallbox_request_data).execute();
+          }
+
+sensor:
+  - platform: template
+    name: "Charging Current"
+    id: wallbox_current
+    unit_of_measurement: "A"
+    accuracy_decimals: 1
+    icon: "mdi:lightning-bolt"
+
+  - platform: template
+    name: "Charging Power"
+    id: wallbox_power
+    unit_of_measurement: "kW"
+    accuracy_decimals: 2
+    icon: "mdi:lightning-bolt"
+
+  - platform: template
+    name: "House total power -DPM-"
+    id: wallbox_house_load
+    unit_of_measurement: "kW"
+    accuracy_decimals: 1
+    icon: "mdi:lightning-bolt"
+
+  - platform: template
+    name: "Session Energy"
+    id: wallbox_session_kwh
+    unit_of_measurement: "kWh"
+    accuracy_decimals: 1
+    icon: "mdi:lightning-bolt-circle"
+
+  - platform: template
+    name: "Session Duration"
+    id: wallbox_charge_minutes
+    unit_of_measurement: "min"
+    accuracy_decimals: 0
+    icon: "mdi:timer-outline"
+
+  - platform: template
+    name: "Voltage"
+    id: wallbox_charge_volts
+    unit_of_measurement: "V"
+    accuracy_decimals: 0
+    icon: "mdi:flash"
+
+  - platform: template
+    name: "Power set"
+    id: wallbox_power_set
+    unit_of_measurement: "kW"
+    accuracy_decimals: 2
+    icon: "mdi:lightning-bolt"
+
+  - platform: template
+    name: "Limit house power set -DPM-"
+    id: house_limit
+    unit_of_measurement: "kW"
+    accuracy_decimals: 2
+    icon: "mdi:lightning-bolt"
