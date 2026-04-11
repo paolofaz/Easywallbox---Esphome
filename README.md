@@ -51,7 +51,7 @@ You need two parameters from your charger:
 - Scan and identify the EasyWallbox 
 - Or use Bluetooth LE Explorer (Microsoft Store), which shows MAC addresses reliably
 
-### From Android APP 
+### From any Android APP 
 
 ---
 
