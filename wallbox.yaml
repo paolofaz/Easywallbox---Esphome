@@ -192,7 +192,7 @@ text_sensor:
                     case 6: stato_txt = "Charge ending"; break;
                     case 5: stato_txt = "Pause"; break;
                     default:
-                      stato_txt = "Sconosciuto (" + std::to_string(stato) + ")";
+                      stato_txt = "Unknown (" + std::to_string(stato) + ")";
                       break;
                   }
                   id(wallbox_charge_state).publish_state(stato_txt);
