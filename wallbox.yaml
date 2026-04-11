@@ -367,13 +367,6 @@ script:
           timeout: 10s
       - delay: 2s 
 
-  - id: reset_text
-    mode: restart
-    then:
-      - delay: 2s
-      - lambda: |-
-          id(wallbox_raw_output).publish_state("");
-
   - id: send_wallbox_limit
     mode: restart
     parameters:
