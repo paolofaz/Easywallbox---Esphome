@@ -9,7 +9,7 @@ This project integrates the EasyWallbox into ESPHome, enabling full Bluetooth co
 ##  Requirements
 
 - ESP32‑S3 development board  
-- EasyWallbox (eSolutions Charging)
+- EasyWallbox (eSolutions Charging) with DPM sensor
 
 ---
 
