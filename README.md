@@ -109,8 +109,6 @@ The commands that can be sent are the following and the raw output returned by t
 
 ### EEPROM / Data Commands
 
-- INDEX WRITE → $EEP,WRITE,IDX,{index}
-- INDEX READ → $EEP,READ,IDX,{index}
 - READ ALARMS → $EEP,READ,AL,{alarmnum}
 - READ MANUFACTURING → $EEP,READ,MF
 - READ CHARGING SESSIONS → $EEP,READ,SL,{sessionnum}
