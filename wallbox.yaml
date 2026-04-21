@@ -18,6 +18,12 @@ esp32:
   variant: esp32s3
   framework:
     type: esp-idf
+    sdkconfig_options:
+      CONFIG_BT_CLASSIC_ENABLED: "n"
+      CONFIG_BT_BLE_DYNAMIC_ENV_MEMORY: "y"
+      CONFIG_ESP_TASK_WDT: "y"
+      CONFIG_ESP_TASK_WDT_TIMEOUT_S: "60"
+      CONFIG_ESP_TASK_WDT_PANIC: "y"
 
 esp32_ble:
   setup_priority: -100
@@ -26,10 +32,12 @@ esp32_ble:
 wifi:
   ssid: "YOUR SSID"
   password: "YOUR PASSWORD"
-#  min_auth_mode: WPA2
+  min_auth_mode: WPA2 #Set your
+  power_save_mode: none   # manca
+  fast_connect: true
 
 logger:
-  level: DEBUG
+  level: WARN  #set debug to show wallbox command in the log shell
 
 api:
   #encryption:
@@ -471,3 +479,9 @@ sensor:
     unit_of_measurement: "kW"
     accuracy_decimals: 2
     icon: "mdi:lightning-bolt"
+
+  - platform: template
+    name: "ESP32 free ram"
+    lambda: return heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+    unit_of_measurement: "B"
+    update_interval: 60s
