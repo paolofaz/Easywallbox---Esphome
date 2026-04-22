@@ -32,8 +32,8 @@ esp32_ble:
 wifi:
   ssid: "YOUR SSID"
   password: "YOUR PASSWORD"
-  min_auth_mode: WPA2 #Set your
-  power_save_mode: none   # manca
+  min_auth_mode: WPA2 #Set your auth mode
+  power_save_mode: none 
   fast_connect: true
 
 logger:
@@ -458,6 +458,7 @@ sensor:
     unit_of_measurement: "min"
     accuracy_decimals: 0
     icon: "mdi:timer-outline"
+    device_class: duration
 
   - platform: template
     name: "Voltage"
