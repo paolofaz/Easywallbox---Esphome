@@ -1,4 +1,4 @@
-substitutions:
+ substitution:
   wallbox_mac: "xx:xx:xx:xx:xx:xx" #Wallbox bluetooth MAC ADRRESS
   wallbox_pin: "XXXX" #Wallbox pin bluetooth (scan qr code, last 4 digit)
   dpm_default: 4.8  #Default KW home DPM 
