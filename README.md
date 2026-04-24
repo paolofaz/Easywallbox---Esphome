@@ -144,4 +144,7 @@ Contributions are welcome
 ## License
 Released under the MIT License.
 
+## 
+**Thanks to the Ceppy's balcony for the inspiration**
+
 
