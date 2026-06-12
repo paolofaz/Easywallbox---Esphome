@@ -318,8 +318,7 @@ switch:
           id(ble_safe_write).execute(cmd);
           id(dpm_is_zero) = false;
           id(house_limit).publish_state(kw);
-      - delay: 20s
-      - script.execute: wallbox_request_data
+
     turn_off_action:
       - lambda: |-
           char cmd[40];
@@ -327,8 +326,7 @@ switch:
           id(ble_safe_write).execute(cmd);
           id(dpm_is_zero) = true;
           id(house_limit).publish_state(0);
-      - delay: 20s
-      - script.execute: wallbox_request_data
+
 button:
   - platform: restart
     name: "Restart ESP32"
@@ -410,7 +408,7 @@ script:
 
 
 interval:
-  - interval: 90s
+  - interval: 60s
     then:
       - if:
           condition:
