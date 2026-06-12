@@ -100,6 +100,7 @@ wifi ssid, wifi password, ota password (optional), api encryption.key (optional)
 - Charging session duration (in minutes)
 - Energy delivered in the current session (kWh, auto‑reset at each new session)
 - Raw data output from the wallbox (for debugging/advanced use)
+- Cable connected to the car
 
 ### Manual Command Service (Advanced Users)
 
