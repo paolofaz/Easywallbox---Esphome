@@ -64,10 +64,7 @@ globals:
   - id: dpm_last_valid
     type: float
     restore_value: yes
-    initial_value: "-1"
-  - id: last_request
-    type: unsigned long
-    initial_value: '0'
+    initial_value: "-1" 
   - id: ble_response_received
     type: bool
     initial_value: "false"
@@ -125,6 +122,7 @@ text_sensor:
     notify: true
     service_uuid: "331a36f5-2459-45ea-9d95-6142f0c4b307"
     characteristic_uuid: "a73e9a10-628f-4494-a099-12efaf72258f"
+    update_interval: never
     on_value:
       then:
         - lambda: |-
@@ -208,7 +206,12 @@ text_sensor:
                     id(car_charging).publish_state(true);
                   } else {
                       id(car_charging).publish_state(false);
-                    }  
+                    }
+                  id(car_connected).publish_state(
+                    stato == 5 ||
+                    stato == 6 ||
+                    stato == 8
+                  );                      
                   float amps = atof(p[10]) / 10.0f;
                   id(wallbox_current).publish_state(amps);
                   float kilowatts = atof(p[11]) / 1000.0f;
@@ -254,6 +257,10 @@ binary_sensor:
     device_class: power
     lambda: |-
       return !id(dpm_is_zero);
+  - platform: template
+    name: "Auto collegata"
+    id: car_connected
+    device_class: plug      
 
 number:
   - platform: template
@@ -403,25 +410,13 @@ script:
 
 
 interval:
-  - interval: 60s
+  - interval: 90s
     then:
-      - lambda: |-
-          unsigned long now = millis();
-          unsigned long delta = now - id(last_request);
-          unsigned long target_interval;
-          if (!id(dpm_is_zero)) {
-            if (id(wallbox_charge_state).state == "Charging") {
-              target_interval = 60000;
-            } else {
-              target_interval = 300000;
-            }
-          } else {
-            target_interval = 1200000;
-          }
-          if (delta >= target_interval) {
-            id(last_request) = now;
-            id(wallbox_request_data).execute();
-          }
+      - if:
+          condition:
+            binary_sensor.is_on: wallbox_connected
+          then:
+            - script.execute: wallbox_request_data
 
 sensor:
   - platform: template
