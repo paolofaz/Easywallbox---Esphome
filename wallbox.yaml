@@ -42,8 +42,8 @@ logger:
 api:
   #encryption:
     #key: "YOURKEY"
-  services:
-    - service: send_command
+  actions:
+    - action: send_command
       variables:
         cmd: string
       then:
