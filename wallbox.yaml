@@ -14,19 +14,12 @@ esphome:
             state: false
 
 esp32:
-  board: esp32-s3-devkitc-1
   variant: esp32s3
+  flash_size: 8MB  
   framework:
     type: esp-idf
-    sdkconfig_options:
-      CONFIG_BT_CLASSIC_ENABLED: "n"
-      CONFIG_BT_BLE_DYNAMIC_ENV_MEMORY: "y"
-      CONFIG_ESP_TASK_WDT: "y"
-      CONFIG_ESP_TASK_WDT_TIMEOUT_S: "60"
-      CONFIG_ESP_TASK_WDT_PANIC: "y"
 
 esp32_ble:
-  setup_priority: -100
   io_capability: keyboard_only
 
 wifi:
@@ -40,8 +33,8 @@ logger:
   level: WARN  #set debug to show wallbox command in the log shell
 
 api:
-  #encryption:
-    #key: "YOURKEY"
+  encryption:
+    key: "YOURKEY"
   actions:
     - action: send_command
       variables:
@@ -52,7 +45,7 @@ api:
 
 ota:
   - platform: esphome
-   # password: "YOUR PASSWORD"
+    encryption:
 
 globals:
   - id: tx_buffer
@@ -77,8 +70,8 @@ esp32_ble_tracker:
     active: false
     
 # Only if you need a bluetooth proxy
-#bluetooth_proxy:
-#  active: false    
+bluetooth_proxy:
+  active: false    
 
 ble_client:
   - mac_address: ${wallbox_mac}
