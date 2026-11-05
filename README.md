@@ -65,6 +65,8 @@ At the top of the YAML file you will find:
 
 ```
 substitutions:
+  wallbox_mac: "xx:xx:xx:xx:xx:xx" # Wallbox Bluetooth MAC address
+  wallbox_pin: "XXXX" # Wallbox Bluetooth PIN (QR code, last 4 digits)
   dpm_default: "6"     # Default DPM threshold (house + EV consumption)
   max_charge_kw: "6"   # Maximum selectable EV charging power (kW)
   max_house_kw: "6"    # Maximum selectable home DPM limit (kW)
