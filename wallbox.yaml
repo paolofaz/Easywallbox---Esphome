@@ -115,8 +115,13 @@ ble_client:
         - script.execute: wallbox_request_data
     on_disconnect:
       then:
+        - script.stop: ble_safe_write
+        - script.stop: send_wallbox_limit
+        - script.stop: send_house_limit
         - lambda: |-
             id(wallbox_connected).publish_state(false);
+            id(tx_buffer).clear();
+            id(ble_response_received) = false;
 
 text_sensor:
   - platform: ble_client
@@ -131,6 +136,12 @@ text_sensor:
       then:
         - lambda: |-
             id(tx_buffer) += x;
+            
+            if (id(tx_buffer).size() > 1024) {
+              ESP_LOGW("wallbox", "Buffer BLE overflow");
+              id(tx_buffer).clear();
+              return;
+            }
             size_t nl = id(tx_buffer).find('\n');
 
             while (nl != std::string::npos) {
