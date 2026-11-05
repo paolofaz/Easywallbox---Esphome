@@ -1,7 +1,9 @@
 substitutions:
-  wallbox_mac: "xx:xx:xx:xx:xx:xx" #Wallbox bluetooth MAC ADRRESS
-  wallbox_pin: "XXXX" #Wallbox pin bluetooth (scan qr code, last 4 digit)
-  dpm_default: 4.8  #Default KW home DPM 
+  wallbox_mac: "xx:xx:xx:xx:xx:xx" # Wallbox Bluetooth MAC address
+  wallbox_pin: "XXXX" # Wallbox Bluetooth PIN (QR code, last 4 digits)
+  dpm_default: "4.8"  # Default home DPM limit (kW); adjust for your installation
+  max_charge_kw: "4.4" # Max charge power (kW); adjust for your installation
+  max_house_kw: "5.2"  # Max home limit (kW); adjust for your installation
 
 esphome:
   name: wallbox
@@ -15,26 +17,31 @@ esphome:
 
 esp32:
   variant: esp32s3
-  flash_size: 8MB  
+  flash_size: 8MB
   framework:
     type: esp-idf
+    advanced:
+      flash_chip: generic
 
 esp32_ble:
   io_capability: keyboard_only
 
+preferences:
+  flash_write_interval: 5min
+
+
 wifi:
   ssid: "YOUR SSID"
   password: "YOUR PASSWORD"
-  min_auth_mode: WPA2 #Set your auth mode
-  power_save_mode: none 
-  fast_connect: true
+  min_auth_mode: WPA2
 
 logger:
-  level: WARN  #set debug to show wallbox command in the log shell
+  level: WARN
 
 api:
   encryption:
     key: "YOURKEY"
+  reboot_timeout: 30min
   actions:
     - action: send_command
       variables:
@@ -47,6 +54,7 @@ ota:
   - platform: esphome
     encryption:
 
+
 globals:
   - id: tx_buffer
     type: std::string
@@ -57,21 +65,20 @@ globals:
   - id: dpm_last_valid
     type: float
     restore_value: yes
-    initial_value: "-1" 
+    initial_value: "-1"
   - id: ble_response_received
     type: bool
     initial_value: "false"
-  
+
 
 esp32_ble_tracker:
   scan_parameters:
     interval: 2s
     window: 200ms
     active: false
-    
-# Only if you need a bluetooth proxy
+
 bluetooth_proxy:
-  active: false    
+  active: false
 
 ble_client:
   - mac_address: ${wallbox_mac}
@@ -82,7 +89,7 @@ ble_client:
             id: wallbox_client
             passkey: 1234
     on_connect:
-      then:   
+      then:
         - lambda: |-
            std::string mac = "${wallbox_mac}";
            esp_bd_addr_t remote_bda;
@@ -97,7 +104,7 @@ ble_client:
             for (int i = 0; i < 6; i++) {
               remote_bda[i] = (uint8_t)values[i];
             }
-            esp_ble_set_encryption(remote_bda, ESP_BLE_SEC_ENCRYPT_MITM);    
+            esp_ble_set_encryption(remote_bda, ESP_BLE_SEC_ENCRYPT_MITM);
         - delay: 8s
         - logger.log: "Invio AUTH..."
         - script.execute:
@@ -170,8 +177,7 @@ text_sensor:
                         id(dpm_last_valid) = kw;
                         }
                       }
-                    id(wallbox_dpm_limit).publish_state(id(dpm_last_valid));                      
-                   
+                    id(wallbox_dpm_limit).publish_state(id(dpm_last_valid));
                   }
                 }
               }
@@ -208,33 +214,34 @@ text_sensor:
                     stato == 5 ||
                     stato == 6 ||
                     stato == 8
-                  );                      
+                  );
                   float amps = atof(p[10]) / 10.0f;
                   id(wallbox_current).publish_state(amps);
                   float kilowatts = atof(p[11]) / 1000.0f;
                   id(wallbox_power).publish_state(kilowatts);
                   float house_load = atof(p[14]) * 0.023f;
                   id(wallbox_house_load).publish_state(house_load);
-                  float session_kwh = atof(p[22]) / 10.0f;
-                  id(wallbox_session_kwh).publish_state(session_kwh);
                   int minutes = atoi(p[23]);
                   id(wallbox_charge_minutes).publish_state(minutes);
+                  float session_kwh = atof(p[22]) / 10.0f;
+                  id(wallbox_session_kwh).publish_state(session_kwh);
                   float volts = 0;
                   if (amps > 0) {
                     volts = atof(p[11]) / amps;
                   }
                   id(wallbox_charge_volts).publish_state(volts);
+                  id(reset_text).execute();
                 }
               }
               nl = id(tx_buffer).find('\n');
             }
 
   - platform: template
-    name: "Raw"
+    name: "Z-RAW Debug"
     id: wallbox_raw_output
 
   - platform: template
-    name: "State"
+    name: "Charge State"
     id: wallbox_charge_state
 
 binary_sensor:
@@ -250,14 +257,14 @@ binary_sensor:
 
   - platform: template
     id: charge_stopped
-    name: "Ready-Stopped"
+    name: "Charge Enabled"
     device_class: power
     lambda: |-
       return !id(dpm_is_zero);
   - platform: template
-    name: "Auto collegata"
+    name: "Car Connected"
     id: car_connected
-    device_class: plug      
+    device_class: plug
 
 number:
   - platform: template
@@ -267,7 +274,7 @@ number:
     unit_of_measurement: "kW"
     device_class: power
     min_value: 1.4
-    max_value: 7.4
+    max_value: ${max_charge_kw}
     step: 0.2
     optimistic: false
     set_action:
@@ -284,13 +291,13 @@ number:
     unit_of_measurement: "kW"
     device_class: power
     min_value: 1.4
-    max_value: 7.4
+    max_value: ${max_house_kw}
     step: 0.2
     optimistic: false
     set_action:
       - lambda: |-
           id(dpm_last_valid) = x;
-          id(wallbox_dpm_limit).publish_state(x);     
+          id(wallbox_dpm_limit).publish_state(x);
       - if:
           condition:
             lambda: 'return !id(dpm_is_zero);'
@@ -328,14 +335,15 @@ button:
   - platform: restart
     name: "Restart ESP32"
   - platform: template
-    name: "Refresh dati"
+    name: "Refresh Data"
     id: btn_sequenza_wallbox
     on_press:
       - script.execute: wallbox_request_user_limit
       - script.execute: wallbox_request_dpm_limit
       - script.execute: wallbox_request_data
+      - script.execute: reset_text
 
-# Helper script per leggere i limiti 
+# Helper script per leggere i limiti
 
 script:
   - id: wallbox_request_user_limit
@@ -375,7 +383,14 @@ script:
           condition:
             lambda: 'return id(ble_response_received);'
           timeout: 10s
-      - delay: 2s 
+      - delay: 2s
+
+  - id: reset_text
+    mode: restart
+    then:
+      - delay: 2s
+      - lambda: |-
+          id(wallbox_raw_output).publish_state("");
 
   - id: send_wallbox_limit
     mode: restart
@@ -470,6 +485,15 @@ sensor:
     unit_of_measurement: "kW"
     accuracy_decimals: 2
     icon: "mdi:lightning-bolt"
+
+  - platform: uptime
+    name: "Uptime"
+    entity_category: diagnostic
+    update_interval: 1h
+    filters:
+      - lambda: return x / 3600.0;
+    accuracy_decimals: 1
+    unit_of_measurement: "h"
 
   - platform: template
     name: "ESP32 free ram"
