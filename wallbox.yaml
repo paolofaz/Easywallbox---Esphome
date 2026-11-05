@@ -1,9 +1,9 @@
 substitutions:
   wallbox_mac: "xx:xx:xx:xx:xx:xx" # Wallbox Bluetooth MAC address
   wallbox_pin: "XXXX" # Wallbox Bluetooth PIN (QR code, last 4 digits)
-  dpm_default: "6"  # Default home DPM limit (kW); adjust for your installation
-  max_charge_kw: "6" # Max charge power (kW); adjust for your installation
-  max_house_kw: "6"  # Max home limit (kW); adjust for your installation
+  dpm_default: "6"     # Default DPM threshold (house + EV consumption)
+  max_charge_kw: "6"   # Maximum selectable EV charging power (kW)
+  max_house_kw: "6"    # Maximum selectable home DPM limit (kW)
 
 esphome:
   name: wallbox
