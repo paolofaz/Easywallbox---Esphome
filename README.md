@@ -65,19 +65,21 @@ At the top of the YAML file you will find:
 
 ```
 substitutions:
-  wallbox_mac: "xx:xx:xx:xx:xx:xx" #Wallbox bluetooth MAC ADRRESS
-  wallbox_pin: "XXXX" #Wallbox pin bluetooth (scan qr code, last 4 digit)
-  dpm_default: 4.8  #Default KW home DPM 
+  dpm_default: "6"     # Default DPM threshold (house + EV consumption)
+  max_charge_kw: "6"   # Maximum selectable EV charging power (kW)
+  max_house_kw: "6"    # Maximum selectable home DPM limit (kW)
 ```
 Replace with:
 
 1) wallbox_mac → your EasyWallbox Bluetooth MAC
 2) wallbox_pin → the 4‑digit PIN
-3) dpm_default → maximum power supported by your installation - Example: 4.8 = 4.8 kW - This is the base DPM value (modifiable later from Home Assistant)
+3) dpm_default → Default DPM power limit (kW). The wallbox dynamically adjusts EV charging power to ensure that the combined consumption of the vehicle and the household (measured by the DPM sensor) does not exceed this threshold. Used as a fallback when no previous valid DPM limit is available.
+4) max_charge_kw → Maximum EV charging power (kW) selectable in Home Assistant. Defines the upper limit of the charging power control, based on your wallbox and electrical installation.
+5) max_house_kw → Maximum home DPM limit (kW) selectable in Home Assistant. Set this according to your home's electrical supply capacity and main circuit breaker rating to avoid exceeding the available power.
 
 Also update:
 
-wifi ssid, wifi password, ota password (optional), api encryption.key (optional)
+wifi ssid, wifi password and api encryption.key (optional)
 
 ---
 
