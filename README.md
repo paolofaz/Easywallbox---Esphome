@@ -1,3 +1,5 @@
+# Last updated on 11/11/26: overall performance improved
+
 # EasyWallbox → ESPHome
 
 Control the EasyWallbox charger (eSolutions Charging) via Bluetooth using ESPHome on an ESP32‑S3.
