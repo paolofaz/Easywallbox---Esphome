@@ -1,4 +1,4 @@
-# Last updated on 11/11/26: overall performance improved
+## Last updated on 11/11/26: overall performance improved
 
 # EasyWallbox → ESPHome
 
