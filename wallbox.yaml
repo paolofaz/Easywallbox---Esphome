@@ -1,9 +1,15 @@
 substitutions:
+  # Personal configuration
+  wifi_ssid: "YOUR SSID"
+  wifi_password: "YOUR PASSWORD"
+  api_key: "YOURKEY"
   wallbox_mac: "xx:xx:xx:xx:xx:xx" # Wallbox Bluetooth MAC address
   wallbox_pin: "XXXX" # Wallbox Bluetooth PIN (QR code, last 4 digits)
   dpm_default: "6"     # Default DPM threshold (house + EV consumption)
   max_charge_kw: "6"   # Maximum selectable EV charging power (kW)
   max_house_kw: "6"    # Maximum selectable home DPM limit (kW)
+  poll_interval_s: "30"   # Polling time polling (in seconds)
+  telemetry_stale_s: "100"  # The time (in seconds) beyond which telemetry is considered off
 
 esphome:
   name: wallbox
@@ -14,6 +20,9 @@ esphome:
         - binary_sensor.template.publish:
             id: wallbox_connected
             state: false
+        - lambda: |-
+            id(wallbox_command_status).publish_state("Connecting");
+            id(wallbox_telemetry_fresh).publish_state(false);
 
 esp32:
   variant: esp32s3
@@ -29,10 +38,9 @@ esp32_ble:
 preferences:
   flash_write_interval: 5min
 
-
 wifi:
-  ssid: "YOUR SSID"
-  password: "YOUR PASSWORD"
+  ssid: "${wifi_ssid}"
+  password: "${wifi_password}"
   min_auth_mode: WPA2
 
 logger:
@@ -40,7 +48,7 @@ logger:
 
 api:
   encryption:
-    key: "YOURKEY"
+    key: "${api_key}"
   reboot_timeout: 30min
   actions:
     - action: send_command
@@ -48,12 +56,11 @@ api:
         cmd: string
       then:
         - lambda: |-
-            id(ble_safe_write).execute(cmd);
+            id(ble_safe_write).execute(cmd, 0);
 
 ota:
   - platform: esphome
     encryption:
-
 
 globals:
   - id: tx_buffer
@@ -69,7 +76,52 @@ globals:
   - id: ble_response_received
     type: bool
     initial_value: "false"
-
+  - id: ble_response_failed
+    type: bool
+    initial_value: "false"
+  - id: ble_pending_response
+    type: std::string
+    initial_value: '""'
+  # UI commands stay immediate; BLE read/echo is tracked separately.
+  - id: charge_command_pending
+    type: bool
+    initial_value: "false"
+  - id: charge_target_raw
+    type: int
+    initial_value: "-1"
+  - id: dpm_command_pending
+    type: bool
+    initial_value: "false"
+  - id: dpm_target_raw
+    type: int
+    initial_value: "-1"
+  - id: dpm_pending_from_slider
+    type: bool
+    initial_value: "false"
+  - id: dpm_confirmed_last_valid
+    type: float
+    initial_value: "-1"
+  - id: ad_seen
+    type: bool
+    initial_value: "false"
+  - id: ad_stale
+    type: bool
+    initial_value: "true"
+  - id: ad_last_rx_ms
+    type: uint32_t
+    initial_value: "0"
+  - id: ad_last_poll_ms
+    type: uint32_t
+    initial_value: "0"
+  - id: charge_verify_pending
+    type: bool
+    initial_value: "false"
+  - id: dpm_verify_pending
+    type: bool
+    initial_value: "false"
+  - id: dpm_state_fresh
+    type: bool
+    initial_value: "false"
 
 esp32_ble_tracker:
   scan_parameters:
@@ -110,6 +162,7 @@ ble_client:
         - script.execute:
             id: ble_safe_write
             cmd: "$BLE,AUTH,${wallbox_pin}"
+            kind: 0
         - script.execute: wallbox_request_user_limit
         - script.execute: wallbox_request_dpm_limit
         - script.execute: wallbox_request_data
@@ -122,6 +175,33 @@ ble_client:
             id(wallbox_connected).publish_state(false);
             id(tx_buffer).clear();
             id(ble_response_received) = false;
+            id(ble_response_failed) = false;
+            id(ble_pending_response).clear();
+            id(dpm_state_fresh) = false;
+            id(charge_stopped).invalidate_state();
+            // Connection loss cancels pending UI requests; don't leave stale targets visible.
+            if (id(charge_command_pending) && id(wallbox_power_set).has_state()) {
+              id(wallbox_user_limit).publish_state(id(wallbox_power_set).state);
+            }
+            id(charge_command_pending) = false;
+            id(charge_verify_pending) = false;
+            id(dpm_verify_pending) = false;
+            id(wallbox_command_status).publish_state("Disconnected");
+            if (id(dpm_command_pending)) {
+              id(wallbox_charge_switch).publish_state(!id(dpm_is_zero));
+              if (id(dpm_pending_from_slider) && id(dpm_confirmed_last_valid) > 0) {
+                id(dpm_last_valid) = id(dpm_confirmed_last_valid);
+                id(wallbox_dpm_limit).publish_state(id(dpm_last_valid));
+              }
+            }
+            id(dpm_command_pending) = false;
+            id(dpm_pending_from_slider) = false;
+            // Invalidate confirmed numbers only after pending UI rollback.
+            id(wallbox_power_set).publish_state(NAN);
+            id(house_limit).publish_state(NAN);
+            id(ad_stale) = true;
+            id(ad_seen) = false;
+            id(wallbox_invalidate_telemetry).execute();
 
 text_sensor:
   - platform: ble_client
@@ -135,60 +215,113 @@ text_sensor:
     on_value:
       then:
         - lambda: |-
-            id(tx_buffer) += x;
-            
+            id(tx_buffer) += x;            
             if (id(tx_buffer).size() > 1024) {
               ESP_LOGW("wallbox", "Buffer BLE overflow");
               id(tx_buffer).clear();
               return;
             }
             size_t nl = id(tx_buffer).find('\n');
-
             while (nl != std::string::npos) {
               std::string line = id(tx_buffer).substr(0, nl);
               id(tx_buffer) = id(tx_buffer).substr(nl + 1);
-
+              if (!line.empty() && line.back() == '\r') line.pop_back();
               id(wallbox_raw_output).publish_state(line);
-              id(ble_response_received) = true;
+              // Only acknowledge the command currently in the BLE queue.
+              if (!id(ble_pending_response).empty()) {
+                const std::string &expected = id(ble_pending_response);
+                const bool is_write = expected.rfind("$EEP,WRITE,IDX,", 0) == 0;
+                const bool matched = (line == expected) ||
+                  (!is_write && line.size() > expected.size() &&
+                   line.compare(0, expected.size(), expected) == 0 &&
+                   line[expected.size()] == ',');
+                if (matched) {
+                  id(ble_response_received) = true;
+                  id(ble_pending_response).clear();
+                } else if (line.rfind("$ERR,", 0) == 0 ||
+                           line == "$BLE,AUTH,FAIL" || line == "$EEP,WRITE,FAIL") {
+                  id(ble_response_failed) = true;
+                  id(ble_pending_response).clear();
+                  ESP_LOGW("wallbox", "BLE command rejected: %s", line.c_str());
+                }
+              }
               if (line.find("$BLE,AUTH,OK") != std::string::npos) {
-                id(wallbox_connected).publish_state(true); }
+                id(wallbox_connected).publish_state(true);
+                id(wallbox_command_status).publish_state("Ready");
+              }
 
-              if (line.find("$EEP,READ,IDX") != std::string::npos) {
+              // The wallbox echoes EEPROM writes with the same format as reads.
+              if (line.rfind("$EEP,READ,IDX,", 0) == 0 ||
+                  line.rfind("$EEP,WRITE,IDX,", 0) == 0) {
                 char buf[200];
                 strncpy(buf, line.c_str(), sizeof(buf)-1);
                 buf[sizeof(buf)-1] = 0;
-
                 char *p[8];
                 int n = 0;
                 char *tok = strtok(buf, ",");
                 while (tok && n < 8) { p[n++] = tok; tok = strtok(nullptr, ","); }
-
                 if (n >= 5) {
                   int idx = atoi(p[3]);
                   float amps_x10 = atof(p[4]);
                   float amps = amps_x10 / 10.0f;
                   float kw_grezzo = amps * 0.23f;
                   float kw = roundf(kw_grezzo * 10.0f) / 10.0f;
+                  const int raw = atoi(p[4]);
+                  const bool read_reply = line.rfind("$EEP,READ,IDX,", 0) == 0;
                   if (idx == 174) {
-                    id(wallbox_user_limit).publish_state(kw);
                     id(wallbox_power_set).publish_state(kw);
+                    // Readback after a missing write echo decides actual state.
+                    const bool verifying = id(charge_verify_pending) && read_reply;
+                    if (verifying || !id(charge_command_pending) ||
+                        raw == id(charge_target_raw)) {
+                      if (id(charge_command_pending)) {
+                        id(wallbox_command_status).publish_state(
+                          verifying
+                            ? (raw == id(charge_target_raw) ? "Verified charge power" :
+                                                             "Charge power differs from request")
+                            : "Confirmed charge power");
+                      }
+                      id(charge_command_pending) = false;
+                      id(charge_verify_pending) = false;
+                      id(wallbox_user_limit).publish_state(kw);
+                    }
                   }
 
                   if (idx == 158) {
-
-                    bool stopped = (amps <= 0);
+                    id(dpm_state_fresh) = true;
+                    const bool stopped = (raw <= 0);
                     id(dpm_is_zero) = stopped;
-
-                    id(wallbox_charge_switch).publish_state(!stopped);
                     id(house_limit).publish_state(kw);
-                    if (stopped && id(dpm_last_valid) < 0) {
+                    if (raw > 0) {
+                      id(dpm_confirmed_last_valid) = kw;
+                      if (!id(dpm_command_pending)) id(dpm_last_valid) = kw;
+                    } else if (id(dpm_last_valid) < 0) {
                       id(dpm_last_valid) = ${dpm_default};
-                    } else {
-                        if (amps > 0) {
-                        id(dpm_last_valid) = kw;
-                        }
+                    }
+
+                    const bool verifying = id(dpm_verify_pending) && read_reply;
+                    if (verifying || !id(dpm_command_pending) ||
+                        raw == id(dpm_target_raw)) {
+                      if (id(dpm_command_pending)) {
+                        id(wallbox_command_status).publish_state(
+                          verifying
+                            ? (raw == id(dpm_target_raw) ? "Verified DPM" :
+                                                          "DPM differs from request")
+                            : "Confirmed DPM");
                       }
-                    id(wallbox_dpm_limit).publish_state(id(dpm_last_valid));
+                      id(dpm_command_pending) = false;
+                      id(dpm_verify_pending) = false;
+                      if (raw > 0 && (!verifying || !id(dpm_pending_from_slider) ||
+                                      raw == id(dpm_target_raw))) {
+                        id(dpm_last_valid) = kw;
+                      } else if (verifying && id(dpm_pending_from_slider) &&
+                                 id(dpm_confirmed_last_valid) > 0) {
+                        id(dpm_last_valid) = id(dpm_confirmed_last_valid);
+                      }
+                      id(dpm_pending_from_slider) = false;
+                      id(wallbox_charge_switch).publish_state(!stopped);
+                      id(wallbox_dpm_limit).publish_state(id(dpm_last_valid));
+                    }
                   }
                 }
               }
@@ -203,13 +336,19 @@ text_sensor:
                   p[n++] = tok;
                   tok = strtok(nullptr, ",");
                 }
-                if (n > 23) {
+                if (n >= 25) {
+                  id(ad_last_rx_ms) = millis();
+                  id(ad_last_poll_ms) = id(ad_last_rx_ms);
+                  id(ad_seen) = true;
+                  id(ad_stale) = false;
+                  id(wallbox_telemetry_fresh).publish_state(true);
                   int stato = atoi(p[7]);
                   std::string stato_txt;
                   switch (stato) {
                     case 3: stato_txt = "Cable Unplugged"; break;
                     case 8: stato_txt = "Charging"; break;
-                    case 6: stato_txt = "Charge ending"; break;
+                    case 6: stato_txt = "Vehicle ready"; break;
+                    case 12: stato_txt = "Error"; break;
                     case 5: stato_txt = "Pause"; break;
                     default:
                       stato_txt = "Unknown (" + std::to_string(stato) + ")";
@@ -226,6 +365,15 @@ text_sensor:
                     stato == 6 ||
                     stato == 8
                   );
+                  // CSV p[0..2] is $DATA,READ,AD; protocol field N is p[N+3].
+                  id(wallbox_pilot_voltage).publish_state(atof(p[4]) / 10.0f);
+                  const int pwm_raw = atoi(p[6]);
+                  // 1000 denotes no PWM; IEC pilot current = PWM(0.1%) * 0.06A.
+                  const bool pwm_valid = pwm_raw >= 100 && pwm_raw <= 850;
+                  id(wallbox_offered_current).publish_state(pwm_valid ? pwm_raw * 0.06f : NAN);
+                  id(wallbox_dpm_enabled).publish_state(atoi(p[9]) == 1);
+                  id(wallbox_safe_limit).publish_state(atof(p[12]) / 10.0f);
+                  id(wallbox_fault).publish_state(atoi(p[21]) != 0);
                   float amps = atof(p[10]) / 10.0f;
                   id(wallbox_current).publish_state(amps);
                   float kilowatts = atof(p[11]) / 1000.0f;
@@ -236,11 +384,6 @@ text_sensor:
                   id(wallbox_charge_minutes).publish_state(minutes);
                   float session_kwh = atof(p[22]) / 10.0f;
                   id(wallbox_session_kwh).publish_state(session_kwh);
-                  float volts = 0;
-                  if (amps > 0) {
-                    volts = atof(p[11]) / amps;
-                  }
-                  id(wallbox_charge_volts).publish_state(volts);
                   id(reset_text).execute();
                 }
               }
@@ -254,6 +397,11 @@ text_sensor:
   - platform: template
     name: "Charge State"
     id: wallbox_charge_state
+
+  - platform: template
+    name: "BLE Command Status"
+    id: wallbox_command_status
+    entity_category: diagnostic
 
 binary_sensor:
   - platform: template
@@ -271,11 +419,29 @@ binary_sensor:
     name: "Charge Enabled"
     device_class: power
     lambda: |-
+      if (!id(dpm_state_fresh)) return {};
       return !id(dpm_is_zero);
   - platform: template
     name: "Car Connected"
     id: car_connected
     device_class: plug
+
+  - platform: template
+    name: "DPM Active"
+    id: wallbox_dpm_enabled
+    entity_category: diagnostic
+
+  - platform: template
+    name: "Wallbox Fault"
+    id: wallbox_fault
+    device_class: problem
+    entity_category: diagnostic
+
+  - platform: template
+    name: "Telemetry Fresh"
+    id: wallbox_telemetry_fresh
+    device_class: connectivity
+    entity_category: diagnostic
 
 number:
   - platform: template
@@ -290,10 +456,17 @@ number:
     optimistic: false
     set_action:
       - lambda: |-
+          if (!id(wallbox_connected).state) {
+            ESP_LOGW("wallbox", "Charge power ignored: BLE not authenticated");
+            return;
+          }
+          // Display the requested power now; Power set stays confirmed.
+          id(charge_target_raw) = (int)((x / 0.23f) * 10.0f + 0.5f);
+          id(charge_command_pending) = true;
+          id(charge_verify_pending) = false;
+          id(wallbox_command_status).publish_state("Pending charge power");
           id(wallbox_user_limit).publish_state(x);
-      - script.execute:
-          id: send_wallbox_limit
-          value: !lambda 'return x;'
+          id(send_wallbox_limit).execute(x);
 
   - platform: template
     name: "Home limit -DPM-"
@@ -307,40 +480,63 @@ number:
     optimistic: false
     set_action:
       - lambda: |-
+          // Remember the next usable DPM limit even when charging is paused.
           id(dpm_last_valid) = x;
           id(wallbox_dpm_limit).publish_state(x);
-      - if:
-          condition:
-            lambda: 'return !id(dpm_is_zero);'
-          then:
-            - script.execute:
-                id: send_house_limit
-                value: !lambda 'return x;'
+          // Check the requested switch state, not the old wallbox echo.
+          if (id(wallbox_connected).state &&
+              id(wallbox_charge_switch).has_state() &&
+              id(wallbox_charge_switch).state) {
+            id(dpm_target_raw) = (int)((x / 0.23f) * 10.0f + 0.5f);
+            id(dpm_command_pending) = true;
+            id(dpm_verify_pending) = false;
+            id(dpm_pending_from_slider) = true;
+            id(wallbox_command_status).publish_state("Pending DPM limit");
+            id(send_house_limit).execute(x);
+          }
 
 switch:
   - platform: template
     name: "Start-Stop"
     id: wallbox_charge_switch
-    lambda: |-
-      return !id(dpm_is_zero);
+    # No lambda: this UI switch shows the requested state while the BLE write is pending.
+    # Charge Enabled and Limit house power set -DPM- report the confirmed state.
+    # DISABLED avoids sending an unintended stop command at ESP32 startup.
+    restore_mode: DISABLED
+    optimistic: false
 
     turn_on_action:
       - lambda: |-
+          if (!id(wallbox_connected).state) {
+            ESP_LOGW("wallbox", "Start ignored: BLE not authenticated");
+            return;
+          }
           float kw = id(dpm_last_valid);
+          if (kw < 1.4f) kw = ${dpm_default};
           int amps_x10 = (int)((kw / 0.23f) * 10.0f + 0.5f);
+          id(dpm_target_raw) = amps_x10;
+          id(dpm_command_pending) = true;
+          id(dpm_verify_pending) = false;
+          id(dpm_pending_from_slider) = false;
+          id(wallbox_command_status).publish_state("Pending DPM start");
+          id(wallbox_charge_switch).publish_state(true);
           char cmd[40];
           snprintf(cmd, sizeof(cmd), "$EEP,WRITE,IDX,158,%d", amps_x10);
-          id(ble_safe_write).execute(cmd);
-          id(dpm_is_zero) = false;
-          id(house_limit).publish_state(kw);
+          id(ble_safe_write).execute(cmd, 2);
 
     turn_off_action:
       - lambda: |-
-          char cmd[40];
-          snprintf(cmd, sizeof(cmd), "$EEP,WRITE,IDX,158,%d", 0);
-          id(ble_safe_write).execute(cmd);
-          id(dpm_is_zero) = true;
-          id(house_limit).publish_state(0);
+          if (!id(wallbox_connected).state) {
+            ESP_LOGW("wallbox", "Stop ignored: BLE not authenticated");
+            return;
+          }
+          id(dpm_target_raw) = 0;
+          id(dpm_command_pending) = true;
+          id(dpm_verify_pending) = false;
+          id(dpm_pending_from_slider) = false;
+          id(wallbox_command_status).publish_state("Pending DPM stop");
+          id(wallbox_charge_switch).publish_state(false);
+          id(ble_safe_write).execute("$EEP,WRITE,IDX,158,0", 2);
 
 button:
   - platform: restart
@@ -354,47 +550,193 @@ button:
       - script.execute: wallbox_request_data
       - script.execute: reset_text
 
-# Helper script per leggere i limiti
+# Helper script (to read the limit)
 
 script:
+  - id: wallbox_invalidate_telemetry
+    mode: restart
+    then:
+      - lambda: |-
+          // Never report old charging measurements as live after a lost BLE link.
+          id(wallbox_charge_state).publish_state("Unavailable");
+          id(car_charging).invalidate_state();
+          id(car_connected).invalidate_state();
+          id(wallbox_dpm_enabled).invalidate_state();
+          id(wallbox_fault).invalidate_state();
+          id(wallbox_telemetry_fresh).publish_state(false);
+          id(wallbox_current).publish_state(NAN);
+          id(wallbox_power).publish_state(NAN);
+          id(wallbox_house_load).publish_state(NAN);
+          id(wallbox_charge_minutes).publish_state(NAN);
+          id(wallbox_session_kwh).publish_state(NAN);
+          id(wallbox_pilot_voltage).publish_state(NAN);
+          id(wallbox_offered_current).publish_state(NAN);
+          id(wallbox_safe_limit).publish_state(NAN);
+
   - id: wallbox_request_user_limit
     then:
       - lambda: |-
-          id(ble_safe_write).execute("$EEP,READ,IDX,174");
+          id(ble_safe_write).execute("$EEP,READ,IDX,174", 0);
 
   - id: wallbox_request_dpm_limit
     then:
       - lambda: |-
-          id(ble_safe_write).execute("$EEP,READ,IDX,158");
+          id(ble_safe_write).execute("$EEP,READ,IDX,158", 0);
 
   - id: wallbox_request_data
     then:
       - lambda: |-
-          id(ble_safe_write).execute("$DATA,READ,AD");
+          id(ble_safe_write).execute("$DATA,READ,AD", 0);
 
   - id: ble_safe_write
     mode: queued
-    max_runs: 10
+    max_runs: 12
     parameters:
       cmd: string
+      kind: int
+    then:
+      # The command type is kept separate from manual commands; stale UI writes
+      # are discarded immediately before transmission to the wallbox.
+      - if:
+          condition:
+            lambda: |-
+              if (kind == 1) {
+                const std::string prefix = "$EEP,WRITE,IDX,174,";
+                if (!id(charge_command_pending) || cmd.rfind(prefix, 0) != 0 ||
+                    atoi(cmd.c_str() + prefix.size()) != id(charge_target_raw)) return false;
+              }
+              if (kind == 2) {
+                const std::string prefix = "$EEP,WRITE,IDX,158,";
+                if (!id(dpm_command_pending) || cmd.rfind(prefix, 0) != 0 ||
+                    atoi(cmd.c_str() + prefix.size()) != id(dpm_target_raw)) return false;
+              }
+              if (kind == 3 && !id(charge_verify_pending)) return false;
+              if (kind == 4 && !id(dpm_verify_pending)) return false;
+              return cmd.rfind("$BLE,AUTH,", 0) == 0 ||
+                     (id(wallbox_connected).has_state() && id(wallbox_connected).state);
+          then:
+            - lambda: |-
+                id(ble_response_received) = false;
+                id(ble_response_failed) = false;
+                id(ble_pending_response) = cmd;
+                // Drop any line ending before comparing requests with replies.
+                while (!id(ble_pending_response).empty() &&
+                       (id(ble_pending_response).back() == '\n' ||
+                        id(ble_pending_response).back() == '\r')) {
+                  id(ble_pending_response).pop_back();
+                }
+                // AUTH and LOGOUT responses do not echo the original request.
+                if (id(ble_pending_response).rfind("$BLE,AUTH,", 0) == 0) {
+                  id(ble_pending_response) = "$BLE,AUTH,OK";
+                } else if (id(ble_pending_response) == "$BLE,LOGOUT") {
+                  id(ble_pending_response) = "$BLE,LOGOUT,OK";
+                }
+            - ble_client.ble_write:
+                id: wallbox_client
+                service_uuid: '331a36f5-2459-45ea-9d95-6142f0c4b307'
+                characteristic_uuid: 'a9da6040-0823-4995-94ec-9ce41ca28833'
+                value: !lambda |-
+                  std::string s = cmd;
+                  if (!s.empty() && s.back() != '\n') {
+                        s += "\n";
+                      }
+                  return std::vector<uint8_t>(s.begin(), s.end());
+            - wait_until:
+                condition:
+                  lambda: 'return id(ble_response_received) || id(ble_response_failed);'
+                timeout: 10s
+            - lambda: |-
+                if (!id(ble_response_received)) {
+                  if (id(ble_response_failed)) {
+                    ESP_LOGW("wallbox", "BLE command failed: %s", cmd.c_str());
+                  } else {
+                    ESP_LOGW("wallbox", "No matching BLE reply (10s timeout): %s", cmd.c_str());
+                  }
+                  id(ble_write_failed).execute(cmd, kind);
+                }
+                id(ble_pending_response).clear();
+            # A silent login cannot recover by polling; restart the BLE session.
+            - if:
+                condition:
+                  lambda: |-
+                    return cmd.rfind("$BLE,AUTH,", 0) == 0 &&
+                           !id(ble_response_received) &&
+                           !id(wallbox_connected).state;
+                then:
+                  - logger.log:
+                      level: WARN
+                      format: "AUTH did not answer: reconnecting BLE client"
+                  - ble_client.disconnect: wallbox_client
+            - delay: 2s
+          else:
+            - lambda: |-
+                if (!id(wallbox_connected).state &&
+                    cmd.rfind("$BLE,AUTH,", 0) != 0) {
+                  ESP_LOGW("wallbox", "BLE command ignored before authentication: %s", cmd.c_str());
+                  id(ble_write_failed).execute(cmd, kind);
+                } else {
+                  ESP_LOGD("wallbox", "Skipped outdated queued command: %s", cmd.c_str());
+                }
+
+  # Missing acknowledgement -> read the register, never blindly retry the write.
+  - id: ble_write_failed
+    mode: parallel
+    parameters:
+      cmd: string
+      kind: int
     then:
       - lambda: |-
-          id(ble_response_received) = false;
-      - ble_client.ble_write:
-          id: wallbox_client
-          service_uuid: '331a36f5-2459-45ea-9d95-6142f0c4b307'
-          characteristic_uuid: 'a9da6040-0823-4995-94ec-9ce41ca28833'
-          value: !lambda |-
-            std::string s = cmd;
-            if (!s.empty() && s.back() != '\n') {
-                  s += "\n";
-                }
-            return std::vector<uint8_t>(s.begin(), s.end());
-      - wait_until:
-          condition:
-            lambda: 'return id(ble_response_received);'
-          timeout: 10s
-      - delay: 2s
+          if (kind == 1 && id(charge_command_pending)) {
+            const std::string prefix = "$EEP,WRITE,IDX,174,";
+            if (cmd.rfind(prefix, 0) != 0 ||
+                atoi(cmd.c_str() + prefix.size()) != id(charge_target_raw)) return;
+            if (id(wallbox_connected).state) {
+              id(charge_verify_pending) = true;
+              id(wallbox_command_status).publish_state("Verifying charge power");
+              id(ble_safe_write).execute("$EEP,READ,IDX,174", 3);
+            } else {
+              id(charge_command_pending) = false;
+              id(charge_verify_pending) = false;
+              if (id(wallbox_power_set).has_state())
+                id(wallbox_user_limit).publish_state(id(wallbox_power_set).state);
+              id(wallbox_command_status).publish_state("Charge power offline");
+            }
+          } else if (kind == 2 && id(dpm_command_pending)) {
+            const std::string prefix = "$EEP,WRITE,IDX,158,";
+            if (cmd.rfind(prefix, 0) != 0 ||
+                atoi(cmd.c_str() + prefix.size()) != id(dpm_target_raw)) return;
+            if (id(wallbox_connected).state) {
+              id(dpm_verify_pending) = true;
+              id(wallbox_command_status).publish_state("Verifying DPM");
+              id(ble_safe_write).execute("$EEP,READ,IDX,158", 4);
+            } else {
+              id(dpm_command_pending) = false;
+              id(dpm_verify_pending) = false;
+              id(wallbox_charge_switch).publish_state(!id(dpm_is_zero));
+              if (id(dpm_pending_from_slider) && id(dpm_confirmed_last_valid) > 0) {
+                id(dpm_last_valid) = id(dpm_confirmed_last_valid);
+                id(wallbox_dpm_limit).publish_state(id(dpm_last_valid));
+              }
+              id(dpm_pending_from_slider) = false;
+              id(wallbox_command_status).publish_state("DPM offline");
+            }
+          } else if (kind == 3 && id(charge_verify_pending)) {
+            id(charge_verify_pending) = false;
+            id(charge_command_pending) = false;
+            if (id(wallbox_power_set).has_state())
+              id(wallbox_user_limit).publish_state(id(wallbox_power_set).state);
+            id(wallbox_command_status).publish_state("Charge verification timeout");
+          } else if (kind == 4 && id(dpm_verify_pending)) {
+            id(dpm_verify_pending) = false;
+            id(dpm_command_pending) = false;
+            id(wallbox_charge_switch).publish_state(!id(dpm_is_zero));
+            if (id(dpm_pending_from_slider) && id(dpm_confirmed_last_valid) > 0) {
+              id(dpm_last_valid) = id(dpm_confirmed_last_valid);
+              id(wallbox_dpm_limit).publish_state(id(dpm_last_valid));
+            }
+            id(dpm_pending_from_slider) = false;
+            id(wallbox_command_status).publish_state("DPM verification timeout");
+          }
 
   - id: reset_text
     mode: restart
@@ -403,43 +745,85 @@ script:
       - lambda: |-
           id(wallbox_raw_output).publish_state("");
 
+  # Slider debounce: only the latest requested value is sent.
   - id: send_wallbox_limit
     mode: restart
     parameters:
       value: float
     then:
-      - delay: 2s
+      - delay: 800ms
       - lambda: |-
-          int amps_x10 = (int)((value / 0.23f) * 10.0f + 0.5f);
+          int raw = (int)((value / 0.23f) * 10.0f + 0.5f);
+          if (!id(charge_command_pending) || raw != id(charge_target_raw)) return;
           char cmd[40];
-          snprintf(cmd, sizeof(cmd), "$EEP,WRITE,IDX,174,%d", amps_x10);
-          id(ble_safe_write).execute(cmd);
-          id(wallbox_power_set).publish_state(value);
+          snprintf(cmd, sizeof(cmd), "$EEP,WRITE,IDX,174,%d", raw);
+          id(ble_safe_write).execute(cmd, 1);
 
   - id: send_house_limit
     mode: restart
     parameters:
       value: float
     then:
-      - delay: 2s
+      - delay: 800ms
       - lambda: |-
-          int amps_x10 = (int)((value / 0.23f) * 10.0f + 0.5f);
+          int raw = (int)((value / 0.23f) * 10.0f + 0.5f);
+          if (!id(dpm_command_pending) || raw != id(dpm_target_raw)) return;
           char cmd[40];
-          snprintf(cmd, sizeof(cmd), "$EEP,WRITE,IDX,158,%d", amps_x10);
-          id(ble_safe_write).execute(cmd);
-          id(house_limit).publish_state(value);
+          snprintf(cmd, sizeof(cmd), "$EEP,WRITE,IDX,158,%d", raw);
+          id(ble_safe_write).execute(cmd, 2);
 
 
 interval:
-  - interval: 60s
+  # The BLE command queue is serialized; polling never adds load on a busy link.
+  - interval: 5s
     then:
       - if:
           condition:
-            binary_sensor.is_on: wallbox_connected
+            and:
+              - binary_sensor.is_on: wallbox_connected
+              - not:
+                  script.is_running: ble_safe_write
           then:
-            - script.execute: wallbox_request_data
+            - lambda: |-
+                const uint32_t now = millis();
+                const uint32_t poll_ms = 1000UL * ${poll_interval_s};
+                if ((uint32_t) (now - id(ad_last_poll_ms)) >= poll_ms) {
+                  id(ad_last_poll_ms) = now;
+                  id(wallbox_request_data).execute();
+                }
+      - if:
+          condition:
+            lambda: |-
+              return id(wallbox_connected).state && id(ad_seen) && !id(ad_stale) &&
+                     (uint32_t)(millis() - id(ad_last_rx_ms)) > (1000UL * ${telemetry_stale_s});
+          then:
+            - lambda: |-
+                id(ad_stale) = true;
+                ESP_LOGW("wallbox", "Wallbox telemetry stale: no AD for ${telemetry_stale_s} seconds");
+                id(wallbox_invalidate_telemetry).execute();
 
 sensor:
+  - platform: template
+    name: "Pilot Advertised Current"
+    id: wallbox_offered_current
+    unit_of_measurement: "A"
+    accuracy_decimals: 1
+    entity_category: diagnostic
+
+  - platform: template
+    name: "Control Pilot Voltage"
+    id: wallbox_pilot_voltage
+    unit_of_measurement: "V"
+    accuracy_decimals: 1
+    entity_category: diagnostic
+
+  - platform: template
+    name: "Safe Current Limit"
+    id: wallbox_safe_limit
+    unit_of_measurement: "A"
+    accuracy_decimals: 1
+    entity_category: diagnostic
+
   - platform: template
     name: "Charging Current"
     id: wallbox_current
@@ -477,13 +861,6 @@ sensor:
     device_class: duration
 
   - platform: template
-    name: "Voltage"
-    id: wallbox_charge_volts
-    unit_of_measurement: "V"
-    accuracy_decimals: 0
-    icon: "mdi:flash"
-
-  - platform: template
     name: "Power set"
     id: wallbox_power_set
     unit_of_measurement: "kW"
@@ -505,9 +882,3 @@ sensor:
       - lambda: return x / 3600.0;
     accuracy_decimals: 1
     unit_of_measurement: "h"
-
-  - platform: template
-    name: "ESP32 free ram"
-    lambda: return heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
-    unit_of_measurement: "B"
-    update_interval: 60s
