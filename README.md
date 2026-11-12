@@ -1,4 +1,4 @@
-## Last updated on 11/11/26: overall performance improved
+## Documentation updated on 12/11/2026
 
 # EasyWallbox → ESPHome
 
@@ -6,7 +6,7 @@ Control the EasyWallbox charger (eSolutions Charging) via Bluetooth using ESPHom
 
 This project integrates EasyWallbox into ESPHome and Home Assistant through a Bluetooth Low Energy (BLE) connection. It exposes charging controls, confirmed settings, current charging measurements and diagnostics.
 
-> **Development version:** This README describes the firmware on the `sviluppo-test` branch. The latest command-queue, recovery, telemetry and entity-cleanup changes still require compilation and testing on a physical ESP32. The stable `main` branch has not been updated.
+> **Firmware status (12 November 2026):** This README describes the firmware currently on `main`. The previously used development branch has been deleted. Recent changes to the BLE command queue, timeout recovery, telemetry and entity cleanup are included in `main`, but their full validation on a physical ESP32 is still pending. The DPM = 0 A pause/resume method is already established in normal use; this does not constitute a full regression test of every recent change.
 
 ---
 
@@ -126,7 +126,7 @@ The `Charge power`, `Home limit -DPM-` and `Start-Stop` controls update the Home
 
 Use `Power set`, `Limit house power set -DPM-`, `Charge Enabled`, and `BLE Command Status` to check the subsequently reported state. In particular, `Charge Enabled` means **the last confirmed DPM limit is greater than zero**, not that the vehicle is drawing current. The separate `Charging` sensor describes the charger-reported charging state.
 
-The BLE writer serializes commands. Sliders have an **800 ms debounce** and obsolete queued slider writes can be skipped before transmission. If a write has no matching response within **10 seconds**, the firmware attempts to read back the corresponding EEPROM register instead of blindly repeating the write. Errors/disconnections and a real charging session still need to be validated with the latest development firmware.
+The BLE writer serializes commands. Sliders have an **800 ms debounce** and obsolete queued slider writes can be skipped before transmission. If a write has no matching response within **10 seconds**, the firmware attempts to read back the corresponding EEPROM register instead of blindly repeating the write. Controlled validation of BLE errors, disconnections and charging-session edge cases is still pending for the current firmware. The established DPM = 0 A pause/resume behavior does not by itself verify these newer error-handling paths.
 
 ### Periodic telemetry and stale data
 
