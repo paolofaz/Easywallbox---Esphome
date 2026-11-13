@@ -174,7 +174,7 @@ The following are the **display names** from ESPHome; the actual Home Assistant 
 | `Power set` | Confirmed vehicle power limit (kW) |
 | `Limit house power set -DPM-` | Confirmed DPM limit (kW, can be 0 while paused) |
 | `Control Pilot Voltage` | Positive Control Pilot signalling voltage (V) |
-| `Pilot Advertised Current` | Maximum current offered to the car by PWM signalling (A), if a valid PWM signal is present |
+| `Pilot Advertised Power` | Maximum power offered to the car by PWM signalling (Kw), if a valid PWM signal is present |
 | `Safe Current Limit` | Charger-reported safety current limit (A) |
 
 #### Diagnostics (3)
