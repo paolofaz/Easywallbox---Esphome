@@ -370,7 +370,7 @@ text_sensor:
                   const int pwm_raw = atoi(p[6]);
                   // 1000 denotes no PWM; IEC pilot current = PWM(0.1%) * 0.06A.
                   const bool pwm_valid = pwm_raw >= 100 && pwm_raw <= 850;
-                  id(wallbox_offered_current).publish_state(pwm_valid ? pwm_raw * 0.06f : NAN);
+                  id(wallbox_offered_current).publish_state(pwm_valid ? pwm_raw * 0.06f * 0.23f : NAN);
                   id(wallbox_dpm_enabled).publish_state(atoi(p[9]) == 1);
                   id(wallbox_safe_limit).publish_state(atof(p[12]) / 10.0f);
                   id(wallbox_fault).publish_state(atoi(p[21]) != 0);
@@ -804,10 +804,11 @@ interval:
 
 sensor:
   - platform: template
-    name: "Pilot Advertised Current"
+    name: "Pilot Advertised Power"
     id: wallbox_offered_current
-    unit_of_measurement: "A"
-    accuracy_decimals: 1
+    unit_of_measurement: "kW"
+    device_class: power
+    accuracy_decimals: 2
     entity_category: diagnostic
 
   - platform: template
