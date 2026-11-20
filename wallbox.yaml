@@ -806,7 +806,7 @@ interval:
 
 sensor:
   - platform: template
-    name: "Pilot Advertised Power"
+    name: "Wallbox Offered Power"
     id: wallbox_offered_current
     unit_of_measurement: "kW"
     device_class: power
@@ -826,13 +826,6 @@ sensor:
     unit_of_measurement: "A"
     accuracy_decimals: 1
     entity_category: diagnostic
-
-  - platform: template
-    name: "Charging Current"
-    id: wallbox_current
-    unit_of_measurement: "A"
-    accuracy_decimals: 1
-    icon: "mdi:lightning-bolt"
 
   - platform: template
     name: "Charging Power"
