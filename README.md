@@ -1,4 +1,4 @@
-## Documentation updated on 12/11/2026
+## Documentation updated on 20/11/2026
 
 # EasyWallbox → ESPHome
 
@@ -81,6 +81,7 @@ substitutions:
   max_house_kw: "6"
   poll_interval_s: "30"
   telemetry_stale_s: "100"
+  show_dpm_slider: false  # true = visible in HA, false = internal only
 ~~~
 
 | Setting | Meaning |
@@ -94,6 +95,7 @@ substitutions:
 | `max_house_kw` | Maximum value of the `Home limit -DPM-` slider, in kW |
 | `poll_interval_s` | Periodic BLE telemetry polling interval in seconds: **30** by default |
 | `telemetry_stale_s` | Seconds since the last valid AD telemetry response before readings are marked stale: **100** by default |
+| `show_dpm_slider` | Show (`true`) or hide (`false`) the DPM limit slider in Home Assistant (**false** by default) |
 
 Choose the power limits based on the charger, installed wiring and supply contract. These UI limits do **not** replace proper electrical protection.
 
@@ -114,6 +116,20 @@ The current Start-Stop logic **requires DPM to be installed and enabled**.
 - **Start / Resume:** restores the previously remembered valid DPM limit. If none is available, the firmware uses `dpm_default` (in kW).
 - **`Charge power` slider:** changes the vehicle user-current limit, using EEPROM index `174`.
 - **`Home limit -DPM-` slider:** changes the total household + vehicle DPM threshold, using EEPROM index `158`. When the Start-Stop switch is OFF, its desired value is remembered for the next resume rather than immediately restarting the session.
+- ### Optional DPM Limit Slider
+
+The `show_dpm_slider` substitution controls whether the `Home limit -DPM-` slider is exposed to Home Assistant.
+
+- **`true`**: The slider is visible and allows manual adjustment of the household DPM power limit.
+- **`false`**: The slider remains internal to ESPHome and is not exposed to Home Assistant.
+
+Hiding the slider does **not** disable DPM or affect charging control.
+
+The **Start-Stop** switch continues to work normally: stopping sets the DPM limit to 0 A, while starting restores the last valid DPM limit or uses `dpm_default` as a fallback.
+
+The confirmed DPM limit remains available through the `Limit house power set -DPM-` sensor.
+
+This setting is applied at compile time. Changing it requires rebuilding and uploading the firmware.
 - **The DPM-enable setting itself is not controlled by a switch in this firmware.** The `DPM Active` entity is a **read-only** diagnostic.
 
 **Why not use native charge STOP / START commands?** On the project owner's wallbox, native `$CMD,CHARGE,STOP,0` prevents a subsequent native START from resuming the same plugged-in session without physically disconnecting/reconnecting the cable. Therefore the firmware deliberately uses DPM = 0 A instead. Do not substitute the native commands in automations assuming equivalent behavior.
@@ -135,7 +151,7 @@ The BLE writer serializes commands. Sliders have an **800 ms debounce** and obso
 - After a previously valid AD frame, if more than **100 seconds** pass without another valid AD frame, `Telemetry Fresh` changes to OFF and the affected measurements are invalidated. BLE disconnection also invalidates affected measurements.
 - Staleness detection changes **only the reported data**: it does not intentionally stop charging or change DPM settings.
 
-### Home Assistant entities (26 exposed)
+### Home Assistant entities (25 or 26 exposed (Home limit -DPM- control is optional)
 
 The following are the **display names** from ESPHome; the actual Home Assistant `entity_id` may differ. One additional BLE receiver, `wallbox_rx`, is internal and is not an exposed entity.
 
@@ -162,11 +178,10 @@ The following are the **display names** from ESPHome; the actual Home Assistant 
 | `Wallbox Fault` | Error indication from the wallbox telemetry |
 | `Telemetry Fresh` | Whether AD telemetry is currently considered fresh |
 
-#### Measurements (10)
+#### Measurements (9)
 
 | Name | Purpose |
 |---|---|
-| `Charging Current` | Measured vehicle charging current (A) |
 | `Charging Power` | Measured vehicle charging power (kW) |
 | `House total power -DPM-` | Total power derived from the wallbox's DPM current reading (kW) |
 | `Session Energy` | Session energy reported by the wallbox (kWh) |
