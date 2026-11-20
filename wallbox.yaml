@@ -392,6 +392,7 @@ text_sensor:
   - platform: template
     name: "Z-RAW Debug"
     id: wallbox_raw_output
+    entity_category: diagnostic
 
   - platform: template
     name: "Charge State"
