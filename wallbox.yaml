@@ -375,8 +375,6 @@ text_sensor:
                   id(wallbox_dpm_enabled).publish_state(atoi(p[9]) == 1);
                   id(wallbox_safe_limit).publish_state(atof(p[12]) / 10.0f);
                   id(wallbox_fault).publish_state(atoi(p[21]) != 0);
-                  float amps = atof(p[10]) / 10.0f;
-                  id(wallbox_current).publish_state(amps);
                   float kilowatts = atof(p[11]) / 1000.0f;
                   id(wallbox_power).publish_state(kilowatts);
                   float house_load = atof(p[14]) * 0.023f;
