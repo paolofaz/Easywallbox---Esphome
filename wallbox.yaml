@@ -565,7 +565,6 @@ script:
           id(wallbox_dpm_enabled).invalidate_state();
           id(wallbox_fault).invalidate_state();
           id(wallbox_telemetry_fresh).publish_state(false);
-          id(wallbox_current).publish_state(NAN);
           id(wallbox_power).publish_state(NAN);
           id(wallbox_house_load).publish_state(NAN);
           id(wallbox_charge_minutes).publish_state(NAN);
