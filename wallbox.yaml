@@ -10,6 +10,7 @@ substitutions:
   max_house_kw: "6"    # Maximum selectable home DPM limit (kW)
   poll_interval_s: "30"   # Polling time polling (in seconds)
   telemetry_stale_s: "100"  # The time (in seconds) beyond which telemetry is considered off
+  show_dpm_slider: false  # true = show in HA, false = hidden
 
 esphome:
   name: wallbox
@@ -471,6 +472,7 @@ number:
   - platform: template
     name: "Home limit -DPM-"
     id: wallbox_dpm_limit
+    internal: ${not show_dpm_slider}
     icon: "mdi:flash"
     unit_of_measurement: "kW"
     device_class: power
