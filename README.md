@@ -153,21 +153,21 @@ The BLE writer serializes commands. Sliders have an **800 ms debounce** and obso
 - After a previously valid AD frame, if more than **100 seconds** pass without another valid AD frame, `Telemetry Fresh` changes to OFF and the affected measurements are invalidated. BLE disconnection also invalidates affected measurements.
 - Staleness detection changes **only the reported data**: it does not intentionally stop charging or change DPM settings.
 
-### Home Assistant entities (25 or 26 exposed (Home limit -DPM- control is optional)
+### Home Assistant entities (24 or 25 exposed (Home limit -DPM- control is optional)
 
 The following are the **display names** from ESPHome; the actual Home Assistant `entity_id` may differ. One additional BLE receiver, `wallbox_rx`, is internal and is not an exposed entity.
 
-#### Controls (5)
+#### Controls (4 or 5)
 
 | Name | Purpose |
 |---|---|
 | `Charge power` | Requested maximum vehicle charging power (kW) |
-| `Home limit -DPM-` | Requested household + EV DPM threshold (kW) |
+| `Home limit -DPM-` | Requested household + EV DPM threshold (kW) (optional) |
 | `Start-Stop` | Resume or pause using the DPM-limit method |
 | `Refresh Data` | Ask the charger for current settings and AD telemetry |
 | `Restart ESP32` | Restart the ESP32 device |
 
-#### States (8)
+#### States (5)
 
 | Name | Purpose |
 |---|---|
@@ -176,11 +176,8 @@ The following are the **display names** from ESPHome; the actual Home Assistant 
 | `Charging` | Whether the charger reports charging state |
 | `Charge Enabled` | Whether the confirmed DPM limit is nonzero |
 | `Car Connected` | Whether the charger detects a connected vehicle |
-| `DPM Active` | Whether the wallbox reports DPM enabled (read-only) |
-| `Wallbox Fault` | Error indication from the wallbox telemetry |
-| `Telemetry Fresh` | Whether AD telemetry is currently considered fresh |
 
-#### Measurements (9)
+#### Measurements (6)
 
 | Name | Purpose |
 |---|---|
@@ -190,17 +187,20 @@ The following are the **display names** from ESPHome; the actual Home Assistant 
 | `Session Duration` | Session charging duration (minutes) |
 | `Power set` | Confirmed vehicle power limit (kW) |
 | `Limit house power set -DPM-` | Confirmed DPM limit (kW, can be 0 while paused) |
-| `Control Pilot Voltage` | Positive Control Pilot signalling voltage (V) |
-| `Wallbox Offered Power` | Maximum power offered to the car by PWM signalling (Kw), if a valid PWM signal is present |
-| `Safe Current Limit` | Charger-reported safety current limit (A) |
 
-#### Diagnostics (3)
+#### Diagnostics (9)
 
 | Name | Purpose |
 |---|---|
 | `Z-RAW Debug` | Raw BLE response text for troubleshooting (the displayed value is cleared after a short delay on AD updates) |
 | `BLE Command Status` | Pending, confirmed, verification or failure status of a command |
 | `Uptime` | ESP32 uptime, in hours |
+| `DPM Active` | Whether the wallbox reports DPM enabled (read-only) |
+| `Wallbox Fault` | Error indication from the wallbox telemetry |
+| `Telemetry Fresh` | Whether AD telemetry is currently considered fresh |
+| `Control Pilot Voltage` | Positive Control Pilot signalling voltage (V) |
+| `Wallbox Offered Power` | Maximum power offered to the car by PWM signalling (Kw), if a valid PWM signal is present |
+| `Safe Current Limit` | Charger-reported safety current limit (A) |
 
 The 12 redundant/low-value sensor definitions (including Voltage, PWM Raw, Duty Cycle, Contactor Closed and ESP32 free ram) were removed from the firmware. The raw protocol message remains available to the parser; removing these sensors does not change the amount of BLE telemetry requested.
 
