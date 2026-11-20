@@ -116,7 +116,8 @@ The current Start-Stop logic **requires DPM to be installed and enabled**.
 - **Start / Resume:** restores the previously remembered valid DPM limit. If none is available, the firmware uses `dpm_default` (in kW).
 - **`Charge power` slider:** changes the vehicle user-current limit, using EEPROM index `174`.
 - **`Home limit -DPM-` slider:** changes the total household + vehicle DPM threshold, using EEPROM index `158`. When the Start-Stop switch is OFF, its desired value is remembered for the next resume rather than immediately restarting the session.
-- ### Optional DPM Limit Slider
+- **The DPM-enable setting itself is not controlled by a switch in this firmware.** The `DPM Active` entity is a **read-only** diagnostic.
+### Optional DPM Limit Slider
 
 The `show_dpm_slider` substitution controls whether the `Home limit -DPM-` slider is exposed to Home Assistant.
 
@@ -130,7 +131,7 @@ The **Start-Stop** switch continues to work normally: stopping sets the DPM limi
 The confirmed DPM limit remains available through the `Limit house power set -DPM-` sensor.
 
 This setting is applied at compile time. Changing it requires rebuilding and uploading the firmware.
-- **The DPM-enable setting itself is not controlled by a switch in this firmware.** The `DPM Active` entity is a **read-only** diagnostic.
+
 
 **Why not use native charge STOP / START commands?** On the project owner's wallbox, native `$CMD,CHARGE,STOP,0` prevents a subsequent native START from resuming the same plugged-in session without physically disconnecting/reconnecting the cable. Therefore the firmware deliberately uses DPM = 0 A instead. Do not substitute the native commands in automations assuming equivalent behavior.
 
