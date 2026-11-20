@@ -371,7 +371,7 @@ text_sensor:
                   const int pwm_raw = atoi(p[6]);
                   // 1000 denotes no PWM; IEC pilot current = PWM(0.1%) * 0.06A.
                   const bool pwm_valid = pwm_raw >= 100 && pwm_raw <= 850;
-                  id(wallbox_offered_current).publish_state(pwm_valid ? pwm_raw * 0.06f * 0.23f : NAN);
+                  id(wallbox_offered_power).publish_state(pwm_valid ? pwm_raw * 0.06f * 0.23f : NAN);
                   id(wallbox_dpm_enabled).publish_state(atoi(p[9]) == 1);
                   id(wallbox_safe_limit).publish_state(atof(p[12]) / 10.0f);
                   id(wallbox_fault).publish_state(atoi(p[21]) != 0);
@@ -570,7 +570,7 @@ script:
           id(wallbox_charge_minutes).publish_state(NAN);
           id(wallbox_session_kwh).publish_state(NAN);
           id(wallbox_pilot_voltage).publish_state(NAN);
-          id(wallbox_offered_current).publish_state(NAN);
+          id(wallbox_offered_power).publish_state(NAN);
           id(wallbox_safe_limit).publish_state(NAN);
 
   - id: wallbox_request_user_limit
@@ -805,7 +805,7 @@ interval:
 sensor:
   - platform: template
     name: "Wallbox Offered Power"
-    id: wallbox_offered_current
+    id: wallbox_offered_power
     unit_of_measurement: "kW"
     device_class: power
     accuracy_decimals: 2
