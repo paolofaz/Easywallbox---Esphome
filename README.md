@@ -133,7 +133,8 @@ The confirmed DPM limit remains available through the `Limit house power set -DP
 This setting is applied at compile time. Changing it requires rebuilding and uploading the firmware.
 
 
-**Why not use native charge STOP / START commands?** On the project owner's wallbox, native `$CMD,CHARGE,STOP,0` prevents a subsequent native START from resuming the same plugged-in session without physically disconnecting/reconnecting the cable. Therefore the firmware deliberately uses DPM = 0 A instead. Do not substitute the native commands in automations assuming equivalent behavior.
+### Why not use native charge STOP / START commands? 
+On the project owner's wallbox, native `$CMD,CHARGE,STOP,0` prevents a subsequent native START from resuming the same plugged-in session without physically disconnecting/reconnecting the cable. Therefore the firmware deliberately uses DPM = 0 A instead. Do not substitute the native commands in automations assuming equivalent behavior.
 
 **Do not turn off DPM while relying on this Start-Stop switch.** With DPM disabled or without the meter, a zero DPM limit may no longer pause charging. This version does not provide a tested alternative control mode for those installations.
 
