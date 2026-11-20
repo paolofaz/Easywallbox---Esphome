@@ -6,8 +6,6 @@ Control the EasyWallbox charger (eSolutions Charging) via Bluetooth using ESPHom
 
 This project integrates EasyWallbox into ESPHome and Home Assistant through a Bluetooth Low Energy (BLE) connection. It exposes charging controls, confirmed settings, current charging measurements and diagnostics.
 
-> **Firmware status (12 November 2026):** This README describes the firmware currently on `main`. The previously used development branch has been deleted. Recent changes to the BLE command queue, timeout recovery, telemetry and entity cleanup are included in `main`, but their full validation on a physical ESP32 is still pending. The DPM = 0 A pause/resume method is already established in normal use; this does not constitute a full regression test of every recent change.
-
 ---
 
 ##  Requirements
