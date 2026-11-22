@@ -445,6 +445,7 @@ text_sensor:
                     case 3: stato_txt = "Cable Unplugged"; break;
                     case 8: stato_txt = "Charging"; break;
                     case 6: stato_txt = "Vehicle ready"; break;
+                    case 7: stato_txt = "Pending"; break;                    
                     case 12: stato_txt = "Error"; break;
                     case 5: stato_txt = "Pause"; break;
                     default:
@@ -460,6 +461,7 @@ text_sensor:
                   id(car_connected).publish_state(
                     stato == 5 ||
                     stato == 6 ||
+                    stato == 7 ||                    
                     stato == 8
                   );
                   // CSV p[0..2] is $DATA,READ,AD; protocol field N is p[N+3].
@@ -470,7 +472,6 @@ text_sensor:
                   id(wallbox_offered_power).publish_state(pwm_valid ? pwm_raw * 0.06f * 0.23f : NAN);
                   id(wallbox_dpm_enabled).publish_state(atoi(p[9]) == 1);
                   id(wallbox_safe_limit).publish_state(atof(p[12]) / 10.0f);
-                  id(wallbox_fault).publish_state(atoi(p[21]) != 0);
                   float kilowatts = atof(p[11]) / 1000.0f;
                   id(wallbox_power).publish_state(kilowatts);
                   float house_load = atof(p[14]) * 0.023f;
@@ -525,12 +526,6 @@ binary_sensor:
   - platform: template
     name: "DPM Active"
     id: wallbox_dpm_enabled
-    entity_category: diagnostic
-
-  - platform: template
-    name: "Wallbox Fault"
-    id: wallbox_fault
-    device_class: problem
     entity_category: diagnostic
 
   - platform: template
@@ -659,7 +654,6 @@ script:
           id(car_charging).invalidate_state();
           id(car_connected).invalidate_state();
           id(wallbox_dpm_enabled).invalidate_state();
-          id(wallbox_fault).invalidate_state();
           id(wallbox_telemetry_fresh).publish_state(false);
           id(wallbox_power).publish_state(NAN);
           id(wallbox_house_load).publish_state(NAN);
