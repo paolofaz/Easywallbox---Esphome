@@ -53,11 +53,70 @@ api:
   reboot_timeout: 30min
   actions:
     - action: send_command
+      # One API action: existing calls still work without requesting a response.
+      supports_response: optional
       variables:
         cmd: string
       then:
-        - lambda: |-
-            id(ble_safe_write).execute(cmd, 0);
+        - if:
+            condition:
+              lambda: |-
+                return cmd.empty() ||
+                       cmd.find('\n') != std::string::npos ||
+                       cmd.find('\r') != std::string::npos ||
+                       !id(wallbox_connected).has_state() ||
+                       !id(wallbox_connected).state ||
+                       id(manual_busy) || id(manual_inflight);
+            then:
+              - api.respond:
+                  data: !lambda |-
+                    root["command"] = cmd.c_str();
+                    root["raw_response"] = "";
+                    if (cmd.empty() ||
+                        cmd.find('\n') != std::string::npos ||
+                        cmd.find('\r') != std::string::npos) {
+                      root["status"] = "invalid_command";
+                    } else if (!id(wallbox_connected).has_state() ||
+                               !id(wallbox_connected).state) {
+                      root["status"] = "disconnected";
+                    } else {
+                      root["status"] = "busy";
+                    }
+            else:
+              - lambda: |-
+                  id(manual_busy) = true;
+                  id(manual_done) = false;
+                  id(manual_reply).clear();
+                  id(manual_status) = "queued";
+                  // This generation identifies the corresponding queued BLE job.
+                  id(manual_token) =
+                      id(manual_token) >= 1000000000 ? 100 : id(manual_token) + 1;
+                  id(ble_safe_write).execute(cmd, id(manual_token));
+              # Wait for queueing plus BLE response, not just for send().
+              - wait_until:
+                  condition:
+                    lambda: 'return id(manual_done);'
+                  timeout: 20s
+              - if:
+                  condition:
+                    lambda: 'return !id(manual_done);'
+                  then:
+                    - lambda: |-
+                        id(manual_status) = id(manual_inflight)
+                            ? "timeout_after_send" : "timeout_in_queue";
+                        id(manual_done) = true;
+                        if (!id(manual_inflight)) {
+                          // Expire an unsent queued job before responding to HA.
+                          id(manual_token) =
+                              id(manual_token) >= 1000000000 ? 100 : id(manual_token) + 1;
+                        }
+              - api.respond:
+                  data: !lambda |-
+                    root["command"] = cmd.c_str();
+                    root["status"] = id(manual_status).c_str();
+                    root["raw_response"] = id(manual_reply).c_str();
+              - lambda: |-
+                  id(manual_busy) = false;
 
 ota:
   - platform: esphome
@@ -123,6 +182,25 @@ globals:
   - id: dpm_state_fresh
     type: bool
     initial_value: "false"
+  # Transient state for the single manual API action.
+  - id: manual_busy
+    type: bool
+    initial_value: "false"
+  - id: manual_inflight
+    type: bool
+    initial_value: "false"
+  - id: manual_done
+    type: bool
+    initial_value: "false"
+  - id: manual_token
+    type: int
+    initial_value: "100"
+  - id: manual_status
+    type: std::string
+    initial_value: '"idle"'
+  - id: manual_reply
+    type: std::string
+    initial_value: '""'
 
 esp32_ble_tracker:
   scan_parameters:
@@ -178,6 +256,11 @@ ble_client:
             id(ble_response_received) = false;
             id(ble_response_failed) = false;
             id(ble_pending_response).clear();
+            if (id(manual_busy) && !id(manual_done)) {
+              id(manual_status) = "disconnected";
+              id(manual_done) = true;
+            }
+            id(manual_inflight) = false;
             id(dpm_state_fresh) = false;
             id(charge_stopped).invalidate_state();
             // Connection loss cancels pending UI requests; don't leave stale targets visible.
@@ -237,10 +320,23 @@ text_sensor:
                    line.compare(0, expected.size(), expected) == 0 &&
                    line[expected.size()] == ',');
                 if (matched) {
+                  // Only expose the reply matched to the in-flight manual command.
+                  if (id(manual_inflight) && id(manual_busy) &&
+                      !id(manual_done)) {
+                    id(manual_reply) = line;
+                    id(manual_status) = "success";
+                    id(manual_done) = true;
+                  }
                   id(ble_response_received) = true;
                   id(ble_pending_response).clear();
                 } else if (line.rfind("$ERR,", 0) == 0 ||
                            line == "$BLE,AUTH,FAIL" || line == "$EEP,WRITE,FAIL") {
+                  if (id(manual_inflight) && id(manual_busy) &&
+                      !id(manual_done)) {
+                    id(manual_reply) = line;
+                    id(manual_status) = "error";
+                    id(manual_done) = true;
+                  }
                   id(ble_response_failed) = true;
                   id(ble_pending_response).clear();
                   ESP_LOGW("wallbox", "BLE command rejected: %s", line.c_str());
@@ -600,6 +696,12 @@ script:
       - if:
           condition:
             lambda: |-
+              if (kind >= 100) {
+                // Never transmit an expired/superseded manual request.
+                if (!id(manual_busy) || id(manual_done) ||
+                    id(manual_inflight) || kind != id(manual_token))
+                  return false;
+              }
               if (kind == 1) {
                 const std::string prefix = "$EEP,WRITE,IDX,174,";
                 if (!id(charge_command_pending) || cmd.rfind(prefix, 0) != 0 ||
@@ -619,6 +721,7 @@ script:
                 id(ble_response_received) = false;
                 id(ble_response_failed) = false;
                 id(ble_pending_response) = cmd;
+                if (kind >= 100) id(manual_inflight) = true;
                 // Drop any line ending before comparing requests with replies.
                 while (!id(ble_pending_response).empty() &&
                        (id(ble_pending_response).back() == '\n' ||
@@ -654,6 +757,15 @@ script:
                   }
                   id(ble_write_failed).execute(cmd, kind);
                 }
+                if (kind >= 100) {
+                  if (kind == id(manual_token) && id(manual_busy) &&
+                      !id(manual_done)) {
+                    id(manual_status) =
+                        id(ble_response_failed) ? "error" : "timeout";
+                    id(manual_done) = true;
+                  }
+                  id(manual_inflight) = false;
+                }
                 id(ble_pending_response).clear();
             # A silent login cannot recover by polling; restart the BLE session.
             - if:
@@ -676,6 +788,12 @@ script:
                   id(ble_write_failed).execute(cmd, kind);
                 } else {
                   ESP_LOGD("wallbox", "Skipped outdated queued command: %s", cmd.c_str());
+                }
+                if (kind >= 100 && kind == id(manual_token) &&
+                    id(manual_busy) && !id(manual_done)) {
+                  id(manual_status) = id(wallbox_connected).state
+                      ? "skipped" : "disconnected";
+                  id(manual_done) = true;
                 }
 
   # Missing acknowledgement -> read the register, never blindly retry the write.
