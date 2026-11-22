@@ -1,4 +1,4 @@
-## Documentation updated on 20/11/2026
+## Documentation updated on 22/11/2026
 
 # EasyWallbox → ESPHome
 
@@ -151,7 +151,7 @@ The BLE writer serializes commands. Sliders have an **800 ms debounce** and obso
 - After a previously valid AD frame, if more than **100 seconds** pass without another valid AD frame, `Telemetry Fresh` changes to OFF and the affected measurements are invalidated. BLE disconnection also invalidates affected measurements.
 - Staleness detection changes **only the reported data**: it does not intentionally stop charging or change DPM settings.
 
-### Home Assistant entities (24 or 25 exposed (Home limit -DPM- control is optional)
+### Home Assistant entities (23 or 24 exposed (Home limit -DPM- control is optional)
 
 The following are the **display names** from ESPHome; the actual Home Assistant `entity_id` may differ. One additional BLE receiver, `wallbox_rx`, is internal and is not an exposed entity.
 
@@ -186,7 +186,7 @@ The following are the **display names** from ESPHome; the actual Home Assistant 
 | `Power set` | Confirmed vehicle power limit (kW) |
 | `Limit house power set -DPM-` | Confirmed DPM limit (kW, can be 0 while paused) |
 
-#### Diagnostics (9)
+#### Diagnostics (8)
 
 | Name | Purpose |
 |---|---|
@@ -194,7 +194,6 @@ The following are the **display names** from ESPHome; the actual Home Assistant 
 | `BLE Command Status` | Pending, confirmed, verification or failure status of a command |
 | `Uptime` | ESP32 uptime, in hours |
 | `DPM Active` | Whether the wallbox reports DPM enabled (read-only) |
-| `Wallbox Fault` | Error indication from the wallbox telemetry |
 | `Telemetry Fresh` | Whether AD telemetry is currently considered fresh |
 | `Control Pilot Voltage` | Positive Control Pilot signalling voltage (V) |
 | `Wallbox Offered Power` | Maximum power offered to the car by PWM signalling (Kw), if a valid PWM signal is present |
