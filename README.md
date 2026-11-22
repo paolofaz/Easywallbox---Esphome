@@ -221,7 +221,23 @@ The wallbox also signals the **maximum current it offers** through a PWM signal 
 
 ### Manual Command Service (Advanced Users)
 
-The ESPHome native API exposes a `send_command` action that forwards an arbitrary command string to the BLE queue. The latest raw response is exposed as **`Z-RAW Debug`**, not a sensor named "Raw".
+The ESPHome native API exposes **one** Home Assistant action, `esphome.wallbox_send_command`, which accepts a `cmd` string and transmits it using the existing serialized BLE queue. In **Developer Tools → Actions**, choose this action, provide a raw command (for example `$EEP,READ,IDX,158`), request a response, and execute it. Home Assistant can display the returned JSON in the same screen. Existing calls that do not request data remain supported (`supports_response: optional`).
+
+Example response (illustrative only; the number below is not a live reading):
+
+~~~json
+{
+  "command": "$EEP,READ,IDX,158",
+  "status": "success",
+  "raw_response": "$EEP,READ,IDX,158,190"
+}
+~~~
+
+The `status` field may be `success`, `error`, `busy`, `disconnected`, `invalid_command`, `skipped`, `timeout`, `timeout_in_queue`, or `timeout_after_send`. Each request waits at most **20 seconds** including queueing; after BLE transmission the existing response matcher has a **10-second timeout**. Expired requests still waiting in the queue are discarded instead of being transmitted late. Commands are not retried blindly. A timeout **after sending** a WRITE does **not** mean the charger rejected or reversed it.
+
+The response is still published to `Z-RAW Debug`, as before. That entity can be overwritten by subsequent polling or cleared shortly afterward; the action response captures the matched line separately. The BLE protocol does not supply per-request correlation IDs, so very late replies cannot be matched with absolute certainty.
+
+Manual commands are diagnostic tools and **not a substitute** for the dedicated Start-Stop and power controls.
 
 **Advanced users only.** Manual commands bypass the normal UI workflow and may change persistent EEPROM settings or disable DPM overload management. They are not required for standard charging control. The commands below are protocol examples retained from the original README; not every manual reply format has been tested with the new BLE response matcher. A command timeout does not by itself prove the wallbox rejected a write.
 
