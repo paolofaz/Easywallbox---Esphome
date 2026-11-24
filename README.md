@@ -1,4 +1,4 @@
-## Documentation updated on 22/11/2026
+## Documentation updated on 24/11/2026
 
 # EasyWallbox → ESPHome
 
@@ -149,7 +149,19 @@ The BLE writer serializes commands. Sliders have an **800 ms debounce** and obso
 - `$DATA,READ,AD` is requested approximately every **30 seconds**, regardless of whether a vehicle is charging. The request is deferred while the BLE command writer is busy, so the interval can be longer.
 - `Refresh Data` manually requests EEPROM index `174`, index `158`, and an AD telemetry frame.
 - After a previously valid AD frame, if more than **100 seconds** pass without another valid AD frame, `Telemetry Fresh` changes to OFF and the affected measurements are invalidated. BLE disconnection also invalidates affected measurements.
-- Staleness detection changes **only the reported data**: it does not intentionally stop charging or change DPM settings.
+- Staleness detection changes **only the reported data**: it does not intentionally stop charging or change DPM settings. The cumulative session totals are retained, not invalidated, when BLE telemetry is lost. They are last-known values until fresh AD data arrives.
+
+### Cumulative session counters — new, field validation pending
+
+The public names and ESPHome IDs of `Session Energy` and `Session Duration` are unchanged. The raw AD fields (energy in tenths of a kWh and duration in minutes) are now internal sensors. Each cumulative counter independently adds positive raw deltas or the first observed value after a reset; pauses or changes in the vehicle SOC target do not end the session. No extra BLE commands are sent.
+
+A verified `Cable Unplugged` state (AD state 3) holds the last totals, then clears both after at least 60 seconds of continuously observed unplugged state. The reset happens on a subsequent valid AD frame, not exactly at wall-clock second 60. A brief replug cancels the reset; a BLE loss, unknown/error state or excessive interval between frames invalidates the unplug evidence. The next valid unplugged frame starts a new confirmation window. The final totals are published before the cable-off state so HA can archive them.
+
+Totals, raw references and active-session flag share one persistent checkpoint. On ordinary reboot the firmware is designed to restore it and reconcile the next raw values; the 5-minute flash write interval is unchanged. Sudden power loss and unobserved counter resets/replugs can lose information and are not guaranteed to be recoverable. The first installation during an existing session can only count increments after a valid baseline; upgrade with the car unplugged.
+
+The public entity IDs should be checked after the first flash. The new counter semantics require the corresponding Smart Charging archive update: the current archive can close on the first cable-off event, while these firmware counters tolerate a short replug. Do not rely on its history until the matching integration changes are tested. If HA is offline throughout the reset window, a completed session cannot necessarily be recovered from these two sensors alone.
+
+Host regression test: `python3 tests/test_session_counters.py` (requires `g++`). It extracts the accumulator from the YAML and tests simulated reset, reconnect, unplug and restored-checkpoint sequences. This is not a complete ESPHome compilation or hardware test. Before OTA, validate and compile the YAML in ESPHome with your local substitutions; test the unchanged entity IDs, ordinary ESP32 reboot, raw counter resets and physical unplug. Rollback by restoring the previous YAML and your own substitutions.
 
 ### Home Assistant entities (23 or 24 exposed (Home limit -DPM- control is optional)
 
@@ -181,8 +193,8 @@ The following are the **display names** from ESPHome; the actual Home Assistant 
 |---|---|
 | `Charging Power` | Measured vehicle charging power (kW) |
 | `House total power -DPM-` | Total power derived from the wallbox's DPM current reading (kW) |
-| `Session Energy` | Session energy reported by the wallbox (kWh) |
-| `Session Duration` | Session charging duration (minutes) |
+| `Session Energy` | Accumulated energy across the physical plug session (kWh) |
+| `Session Duration` | Accumulated wallbox charging minutes across the physical plug session |
 | `Power set` | Confirmed vehicle power limit (kW) |
 | `Limit house power set -DPM-` | Confirmed DPM limit (kW, can be 0 while paused) |
 
