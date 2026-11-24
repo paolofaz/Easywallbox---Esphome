@@ -1,0 +1,12 @@
+# Diario tecnico EasyWallbox ESPHome
+
+## 24/11/2026 — contatori cumulativi per collegamento fisico
+
+- Richiesta approvata: separare la ricostruzione dei contatori grezzi dalla storicizzazione Home Assistant. Firmware modificato su main, unico branch presente al controllo.
+- I campi AD p[22] (decimi di kWh) e p[23] (minuti) sono letti come interi e pubblicati internamente come Raw Session Energy e Raw Session Duration. I precedenti nomi e ID pubblici sono mantenuti per i nuovi cumulativi.
+- I delta positivi e gli incrementi dopo reset sono conteggiati indipendentemente; non si somma un valore grezzo precedente all'installazione senza baseline. Letture invalide e campi CSV ambigui non diventano zero.
+- Stato AD 3 (Cable Unplugged) confermato per almeno 60 s su frame successivi azzera i totali; 5, 6, 7, 8 mantengono la sessione. Error/unknown e perdita BLE annullano l'evidenza di distacco. Intervalli AD troppo lunghi invalidano il timer. I totali sono pubblicati prima degli stati di distacco.
+- Totali, ultime letture e flag attiva in un singolo checkpoint persistente; flash_write_interval rimane 5min. Riavvio ordinario da verificare sull'ESP32; blackout e reset non osservati possono perdere porzioni. I nuovi cumulativi restano visibili come ultimi valori noti con BLE offline.
+- Verificata localmente la logica C++ effettiva estratta dalla YAML (12 scenari sintetici, compilazione g++ C++17, warning come errori): reset indipendenti e multipli, valori residui, breve replug, gap, checkpoint ripristinato, rollover millis, installazione a sessione in corso. Aggiunto test riproducibile nel repo. Non eseguita compilazione completa ESPHome né collaudo hardware.
+- Prima del flash: salvare configurazione locale con credenziali non pubblicate, validare e compilare in ESPHome, preferibilmente a cavo scollegato. Verificare gli entity_id, pausa, riavvio durante carica, distacco e azzeramento. Se necessario ripristinare il firmware del commit e6d008c74cc4f6240b5c4df00dfc24c2b2d25867 con le proprie substitutions.
+- Nessuna modifica al controllo DPM, Start-Stop, coda comandi, polling o custom integration. L'archivio Smart Charging dovrà adottare lo stesso confine di sessione di 60 s e non effettuare una seconda ricostruzione. La RC5 chiude al primo distacco e può essere incoerente dopo un breve replug: non validare lo storico prima della migrazione. HA offline durante tutto l'intervallo di mantenimento potrebbe perdere una sessione chiusa; non è stato aggiunto un archivio permanente delle sessioni nel firmware.
