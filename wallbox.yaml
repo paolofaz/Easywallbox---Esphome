@@ -481,9 +481,26 @@ text_sensor:
                     }
                     return value;
                   };
-                  const int32_t raw_energy = session_parse_int(p[22]);
-                  const int32_t raw_minutes = session_parse_int(p[23]);
-                  const int32_t session_status = session_parse_int(p[7]);
+                  // strtok skips empty CSV tokens. Reject an ambiguous frame
+                  // for session accounting instead of shifting field indices.
+                  bool session_frame_valid = true;
+                  size_t field_start = 0;
+                  for (int field = 0; field < 24; ++field) {
+                    const size_t comma = line.find(',', field_start);
+                    if (comma == std::string::npos || comma == field_start) {
+                      session_frame_valid = false;
+                      break;
+                    }
+                    field_start = comma + 1;
+                  }
+                  if (field_start >= line.size() || line[field_start] == ',')
+                    session_frame_valid = false;
+                  const int32_t raw_energy = session_frame_valid ?
+                    session_parse_int(p[22]) : -1;
+                  const int32_t raw_minutes = session_frame_valid ?
+                    session_parse_int(p[23]) : -1;
+                  const int32_t session_status = session_frame_valid ?
+                    session_parse_int(p[7]) : -1;
                   id(raw_session_kwh).publish_state(
                     raw_energy >= 0 ? raw_energy / 10.0f : NAN);
                   id(raw_session_minutes).publish_state(
