@@ -24,7 +24,6 @@ esphome:
         - lambda: |-
             id(wallbox_command_status).publish_state("Connecting");
             id(wallbox_telemetry_fresh).publish_state(false);
-            // Restore only a known session checkpoint, not synthetic raw data.
             const auto &acc = id(session_accumulator);
             if (acc[4] != 0) {
               id(wallbox_session_kwh).publish_state(acc[0] / 10.0f);
@@ -94,7 +93,6 @@ api:
                   id(manual_done) = false;
                   id(manual_reply).clear();
                   id(manual_status) = "queued";
-                  // This generation identifies the corresponding queued BLE job.
                   id(manual_token) =
                       id(manual_token) >= 1000000000 ? 100 : id(manual_token) + 1;
                   id(ble_safe_write).execute(cmd, id(manual_token));
@@ -112,7 +110,6 @@ api:
                             ? "timeout_after_send" : "timeout_in_queue";
                         id(manual_done) = true;
                         if (!id(manual_inflight)) {
-                          // Expire an unsent queued job before responding to HA.
                           id(manual_token) =
                               id(manual_token) >= 1000000000 ? 100 : id(manual_token) + 1;
                         }
@@ -148,7 +145,6 @@ globals:
   - id: ble_pending_response
     type: std::string
     initial_value: '""'
-  # UI commands stay immediate; BLE read/echo is tracked separately.
   - id: charge_command_pending
     type: bool
     initial_value: "false"
@@ -167,16 +163,10 @@ globals:
   - id: dpm_confirmed_last_valid
     type: float
     initial_value: "-1"
-  # Single persistent checkpoint: energy (0.1 kWh), minutes, last raw
-  # energy, last raw minutes, session state (0=idle, 1=active,
-  # 2=active with last valid AD confirming physical unplug).
-  # Preserve the existing checkpoint layout for upgrade compatibility.
   - id: session_accumulator
     type: "std::array<int32_t, 5>"
     restore_value: yes
     initial_value: "std::array<int32_t, 5>{0, 0, -1, -1, 0}"
-  # Timers are transient: reboot or BLE gaps cannot prove elapsed duration.
-  # The last verified unplug itself is retained in session_accumulator[4].
   - id: session_unplug_pending
     type: bool
     initial_value: "false"
@@ -213,7 +203,6 @@ globals:
   - id: dpm_state_fresh
     type: bool
     initial_value: "false"
-  # Transient state for the single manual API action.
   - id: manual_busy
     type: bool
     initial_value: "false"
@@ -294,7 +283,6 @@ ble_client:
             id(manual_inflight) = false;
             id(dpm_state_fresh) = false;
             id(charge_stopped).invalidate_state();
-            // Connection loss cancels pending UI requests; don't leave stale targets visible.
             if (id(charge_command_pending) && id(wallbox_power_set).has_state()) {
               id(wallbox_user_limit).publish_state(id(wallbox_power_set).state);
             }
@@ -311,7 +299,6 @@ ble_client:
             }
             id(dpm_command_pending) = false;
             id(dpm_pending_from_slider) = false;
-            // Invalidate confirmed numbers only after pending UI rollback.
             id(wallbox_power_set).publish_state(NAN);
             id(house_limit).publish_state(NAN);
             id(ad_stale) = true;
@@ -342,7 +329,6 @@ text_sensor:
               id(tx_buffer) = id(tx_buffer).substr(nl + 1);
               if (!line.empty() && line.back() == '\r') line.pop_back();
               id(wallbox_raw_output).publish_state(line);
-              // Only acknowledge the command currently in the BLE queue.
               if (!id(ble_pending_response).empty()) {
                 const std::string &expected = id(ble_pending_response);
                 const bool is_write = expected.rfind("$EEP,WRITE,IDX,", 0) == 0;
@@ -351,7 +337,6 @@ text_sensor:
                    line.compare(0, expected.size(), expected) == 0 &&
                    line[expected.size()] == ',');
                 if (matched) {
-                  // Only expose the reply matched to the in-flight manual command.
                   if (id(manual_inflight) && id(manual_busy) &&
                       !id(manual_done)) {
                     id(manual_reply) = line;
@@ -377,8 +362,6 @@ text_sensor:
                 id(wallbox_connected).publish_state(true);
                 id(wallbox_command_status).publish_state("Ready");
               }
-
-              // The wallbox echoes EEPROM writes with the same format as reads.
               if (line.rfind("$EEP,READ,IDX,", 0) == 0 ||
                   line.rfind("$EEP,WRITE,IDX,", 0) == 0) {
                 char buf[200];
@@ -398,7 +381,6 @@ text_sensor:
                   const bool read_reply = line.rfind("$EEP,READ,IDX,", 0) == 0;
                   if (idx == 174) {
                     id(wallbox_power_set).publish_state(kw);
-                    // Readback after a missing write echo decides actual state.
                     const bool verifying = id(charge_verify_pending) && read_reply;
                     if (verifying || !id(charge_command_pending) ||
                         raw == id(charge_target_raw)) {
@@ -483,9 +465,6 @@ text_sensor:
                       stato_txt = "Unknown (" + std::to_string(stato) + ")";
                       break;
                   }
-                  // Update totals from this same AD frame BEFORE announcing
-                  // cable OFF, so HA can read the final cumulative values.
-                  // Strict integer parser: invalid data is not a zero/reset.
                   auto session_parse_int = [](const char *field) -> int32_t {
                     if (field == nullptr || *field == '\0') return -1;
                     int32_t value = 0;
@@ -495,8 +474,6 @@ text_sensor:
                     }
                     return value;
                   };
-                  // strtok skips empty CSV tokens. Reject an ambiguous frame
-                  // for session accounting instead of shifting field indices.
                   bool session_frame_valid = true;
                   size_t field_start = 0;
                   for (int field = 0; field < 24; ++field) {
@@ -519,8 +496,6 @@ text_sensor:
                     raw_energy >= 0 ? raw_energy / 10.0f : NAN);
                   id(raw_session_minutes).publish_state(
                     raw_minutes >= 0 ? static_cast<float>(raw_minutes) : NAN);
-
-                  // SESSION_COUNTERS_BEGIN: also compiled by the host tests.
                   auto &acc = id(session_accumulator);
                   const uint32_t now_ms = millis();
                   const uint32_t poll_gap_ms = 1000UL * (${poll_interval_s} + 15UL);
@@ -536,32 +511,25 @@ text_sensor:
                     if (last >= 0) {
                       const int32_t delta = raw >= last ? raw - last :
                                             (allow_reset ? raw : 0);
-                      // Keep the persisted counter arithmetic bounded.
                       if (delta <= 2147483647 - acc[total_idx])
                         acc[total_idx] += delta;
                     }
                     last = raw;
                   };
-                  // Any new AD frame ends the outage timer. Unknown or
-                  // malformed states revoke the fallback's unplug evidence.
                   id(session_offline_pending) = false;
                   if (plugged) {
                     id(session_unplug_pending) = false;
-                    // At first install with no baseline, seed from raw values
-                    // rather than assigning unknown previous-car energy.
                     count(0, 2, raw_energy, true);
                     count(1, 3, raw_minutes, true);
                     acc[4] = 1;
                   } else if (unplugged) {
                     if (acc[4] != 0) {
-                      acc[4] = 2;  // Persist last confirmed physical unplug.
+                      acc[4] = 2;
                       const bool continuous = id(session_unplug_pending) &&
                         static_cast<uint32_t>(now_ms - id(session_unplug_last_ms)) <= max_gap_ms;
                       if (!continuous) {
                         id(session_unplug_since_ms) = now_ms;
                         id(session_unplug_pending) = true;
-                        // Last AD may contain final increments, or an immediate
-                        // duration reset. Only positive increments belong here.
                         count(0, 2, raw_energy, false);
                         count(1, 3, raw_minutes, false);
                       }
@@ -575,16 +543,12 @@ text_sensor:
                     } else {
                       id(session_unplug_pending) = false;
                     }
-                    // Remember retained raw counters while unplugged. A new
-                    // connection must not import the previous car's energy.
                     if (raw_energy >= 0) acc[2] = raw_energy;
                     if (raw_minutes >= 0) acc[3] = raw_minutes;
                   } else {
-                    // Error/unknown is NOT evidence of a physical unplug.
                     id(session_unplug_pending) = false;
                     if (acc[4] != 0) acc[4] = 1;
                   }
-                  // SESSION_COUNTERS_END
                   id(wallbox_session_kwh).publish_state(acc[0] / 10.0f);
                   id(wallbox_charge_minutes).publish_state(static_cast<float>(acc[1]));
                   id(wallbox_charge_state).publish_state(stato_txt);
@@ -599,10 +563,8 @@ text_sensor:
                     stato == 7 ||                    
                     stato == 8
                   );
-                  // CSV p[0..2] is $DATA,READ,AD; protocol field N is p[N+3].
                   id(wallbox_pilot_voltage).publish_state(atof(p[4]) / 10.0f);
                   const int pwm_raw = atoi(p[6]);
-                  // 1000 denotes no PWM; IEC pilot current = PWM(0.1%) * 0.06A.
                   const bool pwm_valid = pwm_raw >= 100 && pwm_raw <= 850;
                   id(wallbox_offered_power).publish_state(pwm_valid ? pwm_raw * 0.06f * 0.23f : NAN);
                   id(wallbox_dpm_enabled).publish_state(atoi(p[9]) == 1);
@@ -682,7 +644,6 @@ number:
             ESP_LOGW("wallbox", "Charge power ignored: BLE not authenticated");
             return;
           }
-          // Display the requested power now; Power set stays confirmed.
           id(charge_target_raw) = (int)((x / 0.23f) * 10.0f + 0.5f);
           id(charge_command_pending) = true;
           id(charge_verify_pending) = false;
@@ -703,10 +664,8 @@ number:
     optimistic: false
     set_action:
       - lambda: |-
-          // Remember the next usable DPM limit even when charging is paused.
           id(dpm_last_valid) = x;
           id(wallbox_dpm_limit).publish_state(x);
-          // Check the requested switch state, not the old wallbox echo.
           if (id(wallbox_connected).state &&
               id(wallbox_charge_switch).has_state() &&
               id(wallbox_charge_switch).state) {
@@ -722,9 +681,6 @@ switch:
   - platform: template
     name: "Start-Stop"
     id: wallbox_charge_switch
-    # No lambda: this UI switch shows the requested state while the BLE write is pending.
-    # Charge Enabled and Limit house power set -DPM- report the confirmed state.
-    # DISABLED avoids sending an unintended stop command at ESP32 startup.
     restore_mode: DISABLED
     optimistic: false
 
@@ -780,7 +736,6 @@ script:
     mode: restart
     then:
       - lambda: |-
-          // Never report old charging measurements as live after a lost BLE link.
           id(wallbox_charge_state).publish_state("Unavailable");
           id(car_charging).invalidate_state();
           id(car_connected).invalidate_state();
@@ -788,9 +743,6 @@ script:
           id(wallbox_telemetry_fresh).publish_state(false);
           id(wallbox_power).publish_state(NAN);
           id(wallbox_house_load).publish_state(NAN);
-          // Retain cumulative session totals and raw reference checkpoint.
-          // BLE loss invalidates raw telemetry and the continuous 60s
-          // timer, but NOT the last confirmed unplug in the checkpoint.
           id(session_unplug_pending) = false;
           id(raw_session_minutes).publish_state(NAN);
           id(raw_session_kwh).publish_state(NAN);
@@ -820,13 +772,10 @@ script:
       cmd: string
       kind: int
     then:
-      # The command type is kept separate from manual commands; stale UI writes
-      # are discarded immediately before transmission to the wallbox.
       - if:
           condition:
             lambda: |-
               if (kind >= 100) {
-                // Never transmit an expired/superseded manual request.
                 if (!id(manual_busy) || id(manual_done) ||
                     id(manual_inflight) || kind != id(manual_token))
                   return false;
@@ -851,13 +800,11 @@ script:
                 id(ble_response_failed) = false;
                 id(ble_pending_response) = cmd;
                 if (kind >= 100) id(manual_inflight) = true;
-                // Drop any line ending before comparing requests with replies.
                 while (!id(ble_pending_response).empty() &&
                        (id(ble_pending_response).back() == '\n' ||
                         id(ble_pending_response).back() == '\r')) {
                   id(ble_pending_response).pop_back();
                 }
-                // AUTH and LOGOUT responses do not echo the original request.
                 if (id(ble_pending_response).rfind("$BLE,AUTH,", 0) == 0) {
                   id(ble_pending_response) = "$BLE,AUTH,OK";
                 } else if (id(ble_pending_response) == "$BLE,LOGOUT") {
@@ -896,7 +843,6 @@ script:
                   id(manual_inflight) = false;
                 }
                 id(ble_pending_response).clear();
-            # A silent login cannot recover by polling; restart the BLE session.
             - if:
                 condition:
                   lambda: |-
@@ -924,8 +870,6 @@ script:
                       ? "skipped" : "disconnected";
                   id(manual_done) = true;
                 }
-
-  # Missing acknowledgement -> read the register, never blindly retry the write.
   - id: ble_write_failed
     mode: parallel
     parameters:
@@ -1021,11 +965,9 @@ script:
 
 
 interval:
-  # The BLE command queue is serialized; polling never adds load on a busy link.
   - interval: 5s
     then:
       - lambda: |-
-          // SESSION_OFFLINE_BEGIN: also compiled by the host tests.
           auto &acc = id(session_accumulator);
           const uint32_t now_ms = millis();
           const bool offline = !id(wallbox_connected).state || id(ad_stale);
@@ -1036,8 +978,6 @@ interval:
             id(session_offline_since_ms) = now_ms;
           } else if (static_cast<uint32_t>(
                        now_ms - id(session_offline_since_ms)) >= 300000UL) {
-            // Only an already observed physical unplug permits fallback.
-            // Never infer unplug from BLE loss while charging/connected.
             acc[0] = 0;
             acc[1] = 0;
             acc[4] = 0;
@@ -1047,7 +987,6 @@ interval:
             id(wallbox_charge_minutes).publish_state(0.0f);
             ESP_LOGW("wallbox", "Session cleared after verified unplug and 5 minutes without telemetry");
           }
-          // SESSION_OFFLINE_END
       - if:
           condition:
             and:
