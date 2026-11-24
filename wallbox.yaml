@@ -58,7 +58,6 @@ api:
   reboot_timeout: 30min
   actions:
     - action: send_command
-      # One API action: existing calls still work without requesting a response.
       supports_response: optional
       variables:
         cmd: string
@@ -96,7 +95,6 @@ api:
                   id(manual_token) =
                       id(manual_token) >= 1000000000 ? 100 : id(manual_token) + 1;
                   id(ble_safe_write).execute(cmd, id(manual_token));
-              # Wait for queueing plus BLE response, not just for send().
               - wait_until:
                   condition:
                     lambda: 'return id(manual_done);'
@@ -729,8 +727,6 @@ button:
       - script.execute: wallbox_request_data
       - script.execute: reset_text
 
-# Helper script (to read the limit)
-
 script:
   - id: wallbox_invalidate_telemetry
     mode: restart
@@ -936,7 +932,6 @@ script:
       - lambda: |-
           id(wallbox_raw_output).publish_state("");
 
-  # Slider debounce: only the latest requested value is sent.
   - id: send_wallbox_limit
     mode: restart
     parameters:
