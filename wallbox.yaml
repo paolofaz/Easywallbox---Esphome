@@ -24,6 +24,12 @@ esphome:
         - lambda: |-
             id(wallbox_command_status).publish_state("Connecting");
             id(wallbox_telemetry_fresh).publish_state(false);
+            // Restore only a known session checkpoint, not synthetic raw data.
+            const auto &acc = id(session_accumulator);
+            if (acc[4] != 0) {
+              id(wallbox_session_kwh).publish_state(acc[0] / 10.0f);
+              id(wallbox_charge_minutes).publish_state(static_cast<float>(acc[1]));
+            }
 
 esp32:
   variant: esp32s3
@@ -162,13 +168,15 @@ globals:
     type: float
     initial_value: "-1"
   # Single persistent checkpoint: energy (0.1 kWh), minutes, last raw
-  # energy, last raw minutes, active session flag. Keep totals and references
-  # together so a restore cannot independently advance either counter.
+  # energy, last raw minutes, session state (0=idle, 1=active,
+  # 2=active with last valid AD confirming physical unplug).
+  # Preserve the existing checkpoint layout for upgrade compatibility.
   - id: session_accumulator
     type: "std::array<int32_t, 5>"
     restore_value: yes
     initial_value: "std::array<int32_t, 5>{0, 0, -1, -1, 0}"
-  # Unplug evidence is transient: uptime and BLE gaps cannot prove duration.
+  # Timers are transient: reboot or BLE gaps cannot prove elapsed duration.
+  # The last verified unplug itself is retained in session_accumulator[4].
   - id: session_unplug_pending
     type: bool
     initial_value: "false"
@@ -176,6 +184,12 @@ globals:
     type: uint32_t
     initial_value: "0"
   - id: session_unplug_last_ms
+    type: uint32_t
+    initial_value: "0"
+  - id: session_offline_pending
+    type: bool
+    initial_value: "false"
+  - id: session_offline_since_ms
     type: uint32_t
     initial_value: "0"
   - id: ad_seen
@@ -528,6 +542,9 @@ text_sensor:
                     }
                     last = raw;
                   };
+                  // Any new AD frame ends the outage timer. Unknown or
+                  // malformed states revoke the fallback's unplug evidence.
+                  id(session_offline_pending) = false;
                   if (plugged) {
                     id(session_unplug_pending) = false;
                     // At first install with no baseline, seed from raw values
@@ -537,6 +554,7 @@ text_sensor:
                     acc[4] = 1;
                   } else if (unplugged) {
                     if (acc[4] != 0) {
+                      acc[4] = 2;  // Persist last confirmed physical unplug.
                       const bool continuous = id(session_unplug_pending) &&
                         static_cast<uint32_t>(now_ms - id(session_unplug_last_ms)) <= max_gap_ms;
                       if (!continuous) {
@@ -564,6 +582,7 @@ text_sensor:
                   } else {
                     // Error/unknown is NOT evidence of a physical unplug.
                     id(session_unplug_pending) = false;
+                    if (acc[4] != 0) acc[4] = 1;
                   }
                   // SESSION_COUNTERS_END
                   id(wallbox_session_kwh).publish_state(acc[0] / 10.0f);
@@ -770,7 +789,8 @@ script:
           id(wallbox_power).publish_state(NAN);
           id(wallbox_house_load).publish_state(NAN);
           // Retain cumulative session totals and raw reference checkpoint.
-          // BLE loss invalidates only raw telemetry and unplug evidence.
+          // BLE loss invalidates raw telemetry and the continuous 60s
+          // timer, but NOT the last confirmed unplug in the checkpoint.
           id(session_unplug_pending) = false;
           id(raw_session_minutes).publish_state(NAN);
           id(raw_session_kwh).publish_state(NAN);
@@ -1004,6 +1024,30 @@ interval:
   # The BLE command queue is serialized; polling never adds load on a busy link.
   - interval: 5s
     then:
+      - lambda: |-
+          // SESSION_OFFLINE_BEGIN: also compiled by the host tests.
+          auto &acc = id(session_accumulator);
+          const uint32_t now_ms = millis();
+          const bool offline = !id(wallbox_connected).state || id(ad_stale);
+          if (acc[4] != 2 || !offline) {
+            id(session_offline_pending) = false;
+          } else if (!id(session_offline_pending)) {
+            id(session_offline_pending) = true;
+            id(session_offline_since_ms) = now_ms;
+          } else if (static_cast<uint32_t>(
+                       now_ms - id(session_offline_since_ms)) >= 300000UL) {
+            // Only an already observed physical unplug permits fallback.
+            // Never infer unplug from BLE loss while charging/connected.
+            acc[0] = 0;
+            acc[1] = 0;
+            acc[4] = 0;
+            id(session_unplug_pending) = false;
+            id(session_offline_pending) = false;
+            id(wallbox_session_kwh).publish_state(0.0f);
+            id(wallbox_charge_minutes).publish_state(0.0f);
+            ESP_LOGW("wallbox", "Session cleared after verified unplug and 5 minutes without telemetry");
+          }
+          // SESSION_OFFLINE_END
       - if:
           condition:
             and:
