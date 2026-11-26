@@ -1,4 +1,4 @@
-## Documentation updated on 24/11/2026
+## Documentation updated on 26/11/2026
 
 # EasyWallbox → ESPHome
 
@@ -146,6 +146,8 @@ The BLE writer serializes commands. Sliders have an **800 ms debounce** and obso
 
 ### Periodic telemetry and stale data
 
+- The 26 November 2026 parser update preserves empty fields in AD and EEPROM responses, preventing subsequent fields from being shifted. Incomplete critical telemetry is rejected rather than treated as a valid update. The updated firmware requires compilation and hardware validation.
+
 - `$DATA,READ,AD` is requested approximately every **30 seconds**, regardless of whether a vehicle is charging. The request is deferred while the BLE command writer is busy, so the interval can be longer.
 - `Refresh Data` manually requests EEPROM index `174`, index `158`, and an AD telemetry frame.
 - After a previously valid AD frame, if more than **100 seconds** pass without another valid AD frame, `Telemetry Fresh` changes to OFF and the affected measurements are invalidated. BLE disconnection also invalidates affected measurements.
@@ -186,7 +188,7 @@ The following are the **display names** from ESPHome; the actual Home Assistant 
 |---|---|
 | `Charging Power` | Measured vehicle charging power (kW) |
 | `House total power -DPM-` | Total power derived from the wallbox's DPM current reading (kW) |
-| `Session Energy` | Accumulated energy across the physical plug session (kWh) |
+| `Session Energy` | Accumulated energy across the physical plug session (kWh; energy device class, total-increasing state class) |
 | `Session Duration` | Accumulated wallbox charging minutes across the physical plug session |
 | `Power set` | Confirmed vehicle power limit (kW) |
 | `Limit house power set -DPM-` | Confirmed DPM limit (kW, can be 0 while paused) |
