@@ -367,9 +367,18 @@ text_sensor:
                 buf[sizeof(buf)-1] = 0;
                 char *p[8];
                 int n = 0;
-                char *tok = strtok(buf, ",");
-                while (tok && n < 8) { p[n++] = tok; tok = strtok(nullptr, ","); }
-                if (n >= 5) {
+                char *tok = buf;
+                while (tok && n < 8) {
+                  p[n++] = tok;
+                  char *comma = strchr(tok, ',');
+                  if (comma) {
+                    *comma = '\0';
+                    tok = comma + 1;
+                  } else {
+                    tok = nullptr;
+                  }
+                }
+                if (line.size() < sizeof(buf) && n >= 5 && *p[3] && *p[4]) {
                   int idx = atoi(p[3]);
                   float amps_x10 = atof(p[4]);
                   float amps = amps_x10 / 10.0f;
@@ -439,12 +448,21 @@ text_sensor:
                 buf[sizeof(buf)-1] = 0;
                 char *p[40];
                 int n = 0;
-                char *tok = strtok(buf, ",");
+                char *tok = buf;
                 while (tok && n < 40) {
                   p[n++] = tok;
-                  tok = strtok(nullptr, ",");
+                  char *comma = strchr(tok, ',');
+                  if (comma) {
+                    *comma = '\0';
+                    tok = comma + 1;
+                  } else {
+                    tok = nullptr;
+                  }
                 }
-                if (n >= 25) {
+                // Reject incomplete critical fields; never shift telemetry indices.
+                if (line.size() < sizeof(buf) && n >= 25 &&
+                    *p[4] && *p[6] && *p[7] && *p[9] &&
+                    *p[11] && *p[12] && *p[14]) {
                   id(ad_last_rx_ms) = millis();
                   id(ad_last_poll_ms) = id(ad_last_rx_ms);
                   id(ad_seen) = true;
@@ -1065,6 +1083,8 @@ sensor:
     id: wallbox_session_kwh
     update_interval: never
     unit_of_measurement: "kWh"
+    device_class: energy
+    state_class: total_increasing
     accuracy_decimals: 1
     icon: "mdi:lightning-bolt-circle"
 
